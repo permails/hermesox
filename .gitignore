@@ -1,0 +1,21 @@
+# Build outputs
+bin/
+obj/
+dist/
+publish/
+*.user
+*.suo
+.vs/
+.idea/
+.avalonia-build-tasks/
+.local/
+.DS_Store
+
+# Reference iOS repo
+reference/
+
+# Local dev data
+data/
+*.db
+*.db-wal
+*.db-shm

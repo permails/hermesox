@@ -1,0 +1,55 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:HermesDesktop.App.ViewModels"
+        xmlns:controls="using:HermesDesktop.App.Controls"
+        x:Class="HermesDesktop.App.Views.BesideChatWindow"
+        x:DataType="vm:MainViewModel"
+        Title="{Binding BesideSession.Title, FallbackValue='Beside Chat'}"
+        Width="440"
+        Height="720"
+        MinWidth="340"
+        MinHeight="460"
+        TransparencyLevelHint="Mica, AcrylicBlur, Blur"
+        Background="{DynamicResource WinMicaBackdropBrush}">
+  <Grid RowDefinitions="Auto,*,Auto" Margin="12">
+    <Border Grid.Row="0" Padding="10,8" Classes="card" Margin="0,0,0,8">
+      <Grid ColumnDefinitions="*,Auto">
+        <StackPanel Grid.Column="0" Spacing="2">
+          <TextBlock Text="{Binding BesideSessionDisplayTitle}" FontWeight="SemiBold" FontSize="14" TextTrimming="CharacterEllipsis"/>
+          <TextBlock Text="{Binding BesideSession.Profile}" FontSize="11" Foreground="{DynamicResource WinTextTertiaryBrush}"/>
+        </StackPanel>
+        <Button Grid.Column="1" Classes="subtle" Content="{Binding Loc.SwapToMain}" Command="{Binding SwapBesideChatCommand}" FontSize="12"/>
+      </Grid>
+    </Border>
+
+    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+      <ItemsControl ItemsSource="{Binding BesideMessages}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:MessageItemViewModel">
+            <Border Margin="0,0,0,8" Padding="10,8" CornerRadius="4"
+                    Background="{DynamicResource WinCardFillBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="1">
+              <StackPanel Spacing="4">
+                <TextBlock Text="{Binding Role}" FontSize="10" Foreground="{DynamicResource WinAccentTextBrush}" FontWeight="SemiBold"/>
+                <controls:AttachmentGalleryView IsVisible="{Binding HasAttachments}"
+                                              Attachments="{Binding Attachments}"
+                                              MediaBytesLoader="{Binding $parent[Window].((vm:MainViewModel)DataContext).MediaBytesLoader}"
+                                              ImageClickCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenImageViewerCommand}"
+                                              FileClickCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenPreviewFileCommand}"/>
+                <controls:MarkdownView Markdown="{Binding Content}"
+                                       PreviewCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenInAppPreviewCommand}"
+                                       BrowserCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenPreviewFileCommand}"
+                                       MediaBytesLoader="{Binding $parent[Window].((vm:MainViewModel)DataContext).MediaBytesLoader}"
+                                       ImageViewerCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenImageViewerCommand}"/>
+              </StackPanel>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </ScrollViewer>
+
+    <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,10,0,0">
+      <TextBox Grid.Column="0" Text="{Binding BesideComposerText}" Watermark="{Binding Loc.QuickBesideWatermark}"/>
+      <Button Grid.Column="1" Classes="accent" Content="{Binding Loc.Send}" Command="{Binding SendBesideQuickMessageCommand}" Margin="8,0,0,0"/>
+    </Grid>
+  </Grid>
+</Window>

@@ -1,0 +1,1403 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:HermesDesktop.App.ViewModels"
+        xmlns:models="using:HermesDesktop.Core.Models"
+        xmlns:conv="using:HermesDesktop.App.Converters"
+        xmlns:controls="using:HermesDesktop.App.Controls"
+        xmlns:webview="clr-namespace:AvaloniaWebView;assembly=Avalonia.WebView"
+        x:Class="HermesDesktop.App.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Title="Hermes Desktop"
+        Icon="avares://HermesDesktop/Assets/hermes-desktop.ico"
+        Width="1380"
+        Height="880"
+        MinWidth="960"
+        MinHeight="640"
+        TransparencyLevelHint="Mica, AcrylicBlur, Blur"
+        Background="{DynamicResource WinMicaBackdropBrush}">
+
+  <Grid RowDefinitions="Auto,*,Auto">
+    <!-- Top Command / Header Bar (Seamless on Windows 11 Mica Base) -->
+    <Border Grid.Row="0" Padding="14,10,14,8" Background="Transparent">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <!-- Brand & Servers -->
+        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+          <Border Width="28" Height="28" CornerRadius="4" Background="{DynamicResource WinAccentFillBrush}">
+            <TextBlock Text="H" FontWeight="Bold" FontSize="14" Foreground="{DynamicResource WinAccentForegroundBrush}"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Border>
+          <StackPanel Spacing="1" VerticalAlignment="Center">
+            <TextBlock Text="Hermes Desktop" FontWeight="SemiBold" FontSize="13.5" Foreground="{DynamicResource WinTextPrimaryBrush}"/>
+            <TextBlock Text="{Binding StatusBanner}" FontSize="11" Foreground="{DynamicResource WinTextSecondaryBrush}" MaxWidth="260" TextTrimming="CharacterEllipsis"/>
+          </StackPanel>
+        </StackPanel>
+
+        <!-- Profile Switcher Strip -->
+        <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Margin="16,0">
+          <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <ToggleButton Classes="pill" IsChecked="{Binding ShowAllProfiles}" Content="{Binding Loc.AllProfiles}" FontSize="12"/>
+            <ItemsControl ItemsSource="{Binding ProfileChips}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <StackPanel Orientation="Horizontal" Spacing="4"/>
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:ProfileOptionViewModel">
+                  <Button CornerRadius="4" Padding="8,4,10,4" BorderThickness="1"
+                          Background="{Binding IsSelected, Converter={x:Static conv:BoolToAccentBrushConverter.Instance}}"
+                          BorderBrush="{Binding IsSelected, Converter={x:Static conv:BoolToBorderBrushConverter.Instance}}"
+                          Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectProfileCommand}"
+                          CommandParameter="{Binding}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <Border Width="18" Height="18" CornerRadius="9" Background="{DynamicResource WinAccentFillBrush}">
+                        <TextBlock Text="{Binding Initial}" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource WinAccentForegroundBrush}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                      </Border>
+                      <TextBlock Text="{Binding DisplayName}" FontSize="12" VerticalAlignment="Center" Foreground="{DynamicResource WinTextPrimaryBrush}"/>
+                    </StackPanel>
+                  </Button>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </ScrollViewer>
+
+        <!-- Right Status Controls -->
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+          <Border IsVisible="{Binding NeedsYouCount, Converter={x:Static conv:IntGreaterThanZeroConverter.Instance}}"
+                  Background="{DynamicResource WinApprovalFillBrush}" BorderBrush="{DynamicResource WinApprovalStrokeBrush}" BorderThickness="1" CornerRadius="4" Padding="10,4">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <TextBlock Text="{Binding Loc.NeedsYouPrefix}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource WinErrorBannerTextBrush}"/>
+              <TextBlock Text="{Binding NeedsYouCount}" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource WinErrorBannerTextBrush}"/>
+            </StackPanel>
+          </Border>
+          <Button Classes="subtle" IsVisible="{Binding HasContextMeter}"
+                  Command="{Binding CompressContextCommand}"
+                  ToolTip.Tip="{Binding Loc.ContextCompressTip}"
+                  FontSize="11" Padding="10,4">
+            <TextBlock Text="{Binding ContextMeterText}" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+          </Button>
+          <Button Classes="subtle" Content="{Binding Loc.Refresh}" Command="{Binding RefreshProfilesAndSessionsCommand}" FontSize="12"/>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- Main Body -->
+    <Grid Grid.Row="1" ColumnDefinitions="76,*">
+      <!-- NavigationView Style Left Rail (Seamless on Mica with 3px Active Accent Pill) -->
+      <Border Grid.Column="0" Background="Transparent" Padding="6,6,6,10">
+        <Grid RowDefinitions="*,Auto">
+          <ItemsControl Grid.Row="0" ItemsSource="{Binding VisibleTabs}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Spacing="4"/>
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:V2TabOptionViewModel">
+                <Button HorizontalAlignment="Stretch" Padding="4,8" CornerRadius="4" BorderThickness="1"
+                        Background="{Binding IsSelected, Converter={x:Static conv:BoolToAccentBrushConverter.Instance}}"
+                        BorderBrush="{Binding IsSelected, Converter={x:Static conv:BoolToBorderBrushConverter.Instance}}"
+                        Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectTabCommand}"
+                        CommandParameter="{Binding Tab}">
+                  <Grid ColumnDefinitions="Auto,*">
+                    <Border Grid.Column="0" Width="3" Height="16" CornerRadius="1.5" Background="{DynamicResource WinAccentFillBrush}"
+                            IsVisible="{Binding IsSelected}" VerticalAlignment="Center" Margin="0,0,2,0"/>
+                    <StackPanel Grid.Column="1" Spacing="4" HorizontalAlignment="Center">
+                      <PathIcon Width="16" Height="16" Foreground="{DynamicResource WinTextPrimaryBrush}"
+                                Data="{Binding Tab, Converter={x:Static conv:TabIconDataConverter.Instance}}"/>
+                      <TextBlock Text="{Binding Label}"
+                                 FontSize="10.5" HorizontalAlignment="Center" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                    </StackPanel>
+                  </Grid>
+                </Button>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <Button Grid.Row="1" Classes="accent" Content="+" FontSize="18" Padding="0,6" ToolTip.Tip="{Binding Loc.NewChat}"
+                  Command="{Binding CreateNewSessionCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
+        </Grid>
+      </Border>
+
+      <!-- Windows 11 Layer-on-Mica Content Surface -->
+      <Border Grid.Column="1" Background="{DynamicResource WinContentLayerBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="1,1,0,0" CornerRadius="8,0,0,0" ClipToBounds="True">
+      <Grid>
+
+        <!-- 1. CHATS TAB -->
+        <Grid IsVisible="{Binding IsChatsTab}" ColumnDefinitions="280,*,Auto,Auto">
+          <!-- Left Sessions Column -->
+          <Border Grid.Column="0" Background="Transparent" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="0,0,1,0" Padding="10,12">
+            <Grid RowDefinitions="Auto,*">
+              <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+                <TextBox Grid.Column="0" Text="{Binding SessionSearchQuery}" Watermark="{Binding Loc.SearchSessionsWatermark}"/>
+                <Button Grid.Column="1" Classes="accent" Content="{Binding Loc.NewShort}" Command="{Binding CreateNewSessionCommand}" Margin="8,0,0,0" Padding="12,7"/>
+              </Grid>
+
+              <ListBox Grid.Row="1" Classes="sessions" ItemsSource="{Binding FilteredSessions}" SelectedItem="{Binding ActiveSession}" Background="Transparent">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="models:SessionSummary">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <StackPanel Grid.Column="0" Spacing="3" Margin="0,0,6,0">
+                        <Grid ColumnDefinitions="Auto,*,Auto">
+                          <Ellipse Grid.Column="0" Width="7" Height="7" Fill="{DynamicResource WinAccentFillBrush}"
+                                   IsVisible="{Binding IsUnread, FallbackValue=False}"
+                                   VerticalAlignment="Center" Margin="0,0,6,0"/>
+                          <TextBlock Grid.Column="1" Text="{Binding Title}" FontWeight="SemiBold" FontSize="13"
+                                     Foreground="{DynamicResource WinTextPrimaryBrush}" TextTrimming="CharacterEllipsis"/>
+                          <TextBlock Grid.Column="2" Text="{Binding UpdatedLabel}" FontSize="10.5"
+                                     Foreground="{DynamicResource WinTextTertiaryBrush}" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                        </Grid>
+                        <TextBlock Text="{Binding Preview}"
+                                   IsVisible="{Binding Preview, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                   FontSize="11.5" Foreground="{DynamicResource WinTextSecondaryBrush}" TextTrimming="CharacterEllipsis" MaxLines="1"/>
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <TextBlock Text="★" FontSize="10" Foreground="{DynamicResource WinAccentTextBrush}" IsVisible="{Binding IsPinned, FallbackValue=False}"/>
+                          <TextBlock Text="{Binding Profile}" FontSize="10.5" Foreground="{DynamicResource WinTextTertiaryBrush}"/>
+                        </StackPanel>
+                      </StackPanel>
+
+                      <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+                        <Button Classes="ghost" Content="★" FontSize="11"
+                                ToolTip.Tip="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.PinUnpinTip}"
+                                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).TogglePinSessionCommand}"
+                                CommandParameter="{Binding}"/>
+                        <Button Classes="ghost" Content="◫" FontSize="12"
+                                ToolTip.Tip="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.OpenInBesideChatTip}"
+                                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenInBesideChatCommand}"
+                                CommandParameter="{Binding}"/>
+                      </StackPanel>
+                    </Grid>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </Grid>
+          </Border>
+
+          <!-- Center Conversation Column -->
+          <Grid Grid.Column="1" RowDefinitions="Auto,*,Auto" Margin="16,12">
+            <!-- Header -->
+            <Border Grid.Row="0" Padding="14,10" Classes="card" Margin="0,0,0,12">
+              <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Grid.Column="0" Spacing="2">
+                  <TextBlock Text="{Binding ActiveSessionDisplayTitle}" FontSize="15.5" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <TextBlock Text="{Binding CurrentModelLabel}" FontSize="11.5" Foreground="{DynamicResource WinAccentTextBrush}" FontWeight="Medium"/>
+                    <TextBlock Text="{Binding CurrentCwd}" FontSize="11.5" Foreground="{DynamicResource WinTextTertiaryBrush}" TextTrimming="CharacterEllipsis"/>
+                  </StackPanel>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                  <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsRunningTurn}" Width="68" Height="4" Foreground="{DynamicResource WinAccentFillBrush}" VerticalAlignment="Center"/>
+                  <Button Classes="subtle" Content="{Binding Loc.Stop}" IsVisible="{Binding IsRunningTurn}" Command="{Binding InterruptTurnCommand}"/>
+                </StackPanel>
+              </Grid>
+            </Border>
+
+            <!-- Transcript -->
+            <ScrollViewer Grid.Row="1" x:Name="TranscriptScroller" VerticalScrollBarVisibility="Auto">
+              <StackPanel Margin="4,4,18,12" Spacing="2">
+                <ItemsControl ItemsSource="{Binding ActiveMessages}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:MessageItemViewModel">
+                      <StackPanel IsVisible="{Binding IsAnyPartVisible}" Margin="0,0,0,2" Spacing="2">
+                      <!-- User Bubble -->
+                      <Border IsVisible="{Binding IsUser}" HorizontalAlignment="Right" MaxWidth="700" Margin="0,10,0,6"
+                              Background="{DynamicResource WinUserBubbleFillBrush}" BorderBrush="{DynamicResource WinUserBubbleStrokeBrush}"
+                              BorderThickness="1" CornerRadius="8,8,4,8" Padding="14,10">
+                        <StackPanel Spacing="6">
+                          <controls:AttachmentGalleryView IsVisible="{Binding HasAttachments}"
+                                                        Attachments="{Binding Attachments}"
+                                                        MediaBytesLoader="{Binding $parent[Window].((vm:MainViewModel)DataContext).MediaBytesLoader}"
+                                                        ImageClickCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenImageViewerCommand}"
+                                                        FileClickCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenPreviewFileCommand}"/>
+                          <SelectableTextBlock IsVisible="{Binding HasVisibleContent}" Text="{Binding Content}" TextWrapping="Wrap" FontSize="13.5" LineHeight="20" Foreground="{DynamicResource WinTextPrimaryBrush}"/>
+                          <TextBlock Text="{Binding Timestamp}" FontSize="10" Foreground="{DynamicResource WinTextTertiaryBrush}" HorizontalAlignment="Right"
+                                     IsVisible="{Binding Timestamp, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                        </StackPanel>
+                      </Border>
+
+                      <!-- Collapsed / Expandable Process Step Run Header (Fluent Sunken Expander) -->
+                      <Border IsVisible="{Binding IsRunHeader}" HorizontalAlignment="Stretch" Margin="8,4,80,2"
+                              Background="{DynamicResource WinCardSecondaryBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}"
+                              BorderThickness="1" CornerRadius="6" Padding="2">
+                        <Button Classes="ghost" Padding="10,5" CornerRadius="4" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ToggleStepRunCommand}"
+                                CommandParameter="{Binding}">
+                          <Grid ColumnDefinitions="Auto,*,Auto">
+                            <Border Grid.Column="0" Width="18" Height="18" CornerRadius="9" Background="{DynamicResource WinControlFillBrush}"
+                                    BorderBrush="{DynamicResource WinControlStrokeBrush}" BorderThickness="1" Margin="0,0,8,0" VerticalAlignment="Center">
+                              <TextBlock Text="⚙" FontSize="10" Foreground="{DynamicResource WinAccentTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <TextBlock Grid.Column="1" Text="{Binding RunSummaryText}" FontSize="12" FontWeight="Medium"
+                                       Foreground="{DynamicResource WinTextSecondaryBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="2" Text="{Binding RunChevron}" FontSize="11" Foreground="{DynamicResource WinTextTertiaryBrush}" VerticalAlignment="Center" Margin="10,0,2,0"/>
+                          </Grid>
+                        </Button>
+                      </Border>
+
+                      <!-- Pre-Tool Self-Narration inside Process Timeline (sunken rail) -->
+                      <Border IsVisible="{Binding IsCollapsedProcessNarration}" Margin="16,0,80,0"
+                              BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="2,0,0,0" Padding="12,3,4,3">
+                        <SelectableTextBlock Text="{Binding ProcessNarrationOneLine}" TextWrapping="Wrap" FontSize="12" LineHeight="18"
+                                             Foreground="{DynamicResource WinTextTertiaryBrush}"/>
+                      </Border>
+
+                      <!-- Compact Reasoning-Only Timeline Row (sunken 2px Fluent rail) -->
+                      <Border IsVisible="{Binding IsReasoningRowVisible}" Margin="16,0,80,0"
+                              BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="2,0,0,0" Padding="10,1,0,1">
+                        <StackPanel Spacing="4">
+                          <Button Classes="ghost" Padding="6,3" CornerRadius="4" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                  Command="{Binding ToggleReasoningCommand}">
+                            <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+                              <TextBlock Grid.Column="0" Text="⋯" FontSize="11.5" Foreground="{DynamicResource WinTextTertiaryBrush}"
+                                         Width="16" TextAlignment="Center" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                              <TextBlock Grid.Column="1" Text="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.Thought}" FontSize="12" FontWeight="Medium"
+                                         Foreground="{DynamicResource WinTextSecondaryBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                              <TextBlock Grid.Column="2" Text="{Binding ReasoningPreview}" FontSize="11.5" Foreground="{DynamicResource WinTextTertiaryBrush}"
+                                         TextTrimming="CharacterEllipsis" VerticalAlignment="Center" IsVisible="{Binding !IsReasoningExpanded}"/>
+                              <TextBlock Grid.Column="3" Text="{Binding ReasoningChevron}" FontSize="11" Foreground="{DynamicResource WinTextTertiaryBrush}" VerticalAlignment="Center" Margin="10,0,2,0"/>
+                            </Grid>
+                          </Button>
+                          <Border IsVisible="{Binding IsReasoningExpanded}" Margin="22,0,0,4"
+                                  Background="{DynamicResource WinThoughtCardFillBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}"
+                                  BorderThickness="1" CornerRadius="6" Padding="12,8">
+                            <SelectableTextBlock Text="{Binding Reasoning}"
+                                                 TextWrapping="Wrap" FontSize="12" LineHeight="18" Foreground="{DynamicResource WinTextSecondaryBrush}"
+                                                 FontFamily="{StaticResource WinMonoFontFamily}"/>
+                          </Border>
+                        </StackPanel>
+                      </Border>
+
+                      <!-- Elevated Assistant Reply Card (Foreground Layer speaking directly to the user) -->
+                      <Border IsVisible="{Binding IsElevatedAssistantReply}" HorizontalAlignment="Left" MaxWidth="820" Margin="0,8,0,10"
+                              Background="{DynamicResource WinCardFillBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}"
+                              BorderThickness="1" CornerRadius="8" Padding="16,12">
+                        <StackPanel Spacing="10">
+                          <!-- Agent Identity Attribution Header -->
+                          <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Border Width="20" Height="20" CornerRadius="10" Background="{DynamicResource WinAccentFillBrush}">
+                              <TextBlock Text="{Binding $parent[Window].((vm:MainViewModel)DataContext).ActiveReplyAuthorInitial}"
+                                         FontSize="10.5" FontWeight="Bold" Foreground="{DynamicResource WinAccentForegroundBrush}"
+                                         HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <TextBlock Text="{Binding $parent[Window].((vm:MainViewModel)DataContext).ActiveReplyAuthorName}"
+                                       FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource WinTextPrimaryBrush}" VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding Timestamp}" FontSize="11" Foreground="{DynamicResource WinTextTertiaryBrush}" VerticalAlignment="Center"
+                                       IsVisible="{Binding Timestamp, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                          </StackPanel>
+
+                          <StackPanel IsVisible="{Binding HasReasoning}" Spacing="6">
+                            <Button Classes="ghost" Padding="4,2" HorizontalAlignment="Left" Command="{Binding ToggleReasoningCommand}">
+                              <StackPanel Orientation="Horizontal" Spacing="6">
+                                <TextBlock Text="{Binding ReasoningChevron}" FontSize="11" Foreground="{DynamicResource WinAccentTextBrush}"/>
+                                <TextBlock Text="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.ThoughtProcess}" FontSize="11.5" Foreground="{DynamicResource WinAccentTextBrush}" FontWeight="Medium"/>
+                              </StackPanel>
+                            </Button>
+                            <Border IsVisible="{Binding IsReasoningExpanded}" Background="{DynamicResource WinThoughtCardFillBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="1" CornerRadius="4" Padding="10,8">
+                              <SelectableTextBlock Text="{Binding Reasoning}" TextWrapping="Wrap" FontSize="12" LineHeight="18" Foreground="{DynamicResource WinTextSecondaryBrush}" FontFamily="{StaticResource WinMonoFontFamily}"/>
+                            </Border>
+                          </StackPanel>
+                          <controls:AttachmentGalleryView IsVisible="{Binding HasAttachments}"
+                                                        Attachments="{Binding Attachments}"
+                                                        MediaBytesLoader="{Binding $parent[Window].((vm:MainViewModel)DataContext).MediaBytesLoader}"
+                                                        ImageClickCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenImageViewerCommand}"
+                                                        FileClickCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenPreviewFileCommand}"/>
+                          <controls:MarkdownView IsVisible="{Binding HasVisibleContent}"
+                                                 Markdown="{Binding Content}"
+                                                 PreviewCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenInAppPreviewCommand}"
+                                                 BrowserCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenPreviewFileCommand}"
+                                                 MediaBytesLoader="{Binding $parent[Window].((vm:MainViewModel)DataContext).MediaBytesLoader}"
+                                                 ImageViewerCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenImageViewerCommand}"/>
+                        </StackPanel>
+                      </Border>
+
+                      <!-- Rich Card Board -->
+                      <controls:RichBoardView IsVisible="{Binding IsRichBoardCard}" HorizontalAlignment="Left" MaxWidth="800" Margin="0,4,0,6"
+                                              Tool="{Binding Tool}"
+                                              FollowUpCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).SendFollowUpPromptCommand}"/>
+
+                      <!-- Compact Standard Tool Timeline Row (sunken 2px Fluent rail) -->
+                      <Border IsVisible="{Binding IsStandardToolRowVisible}" Margin="16,0,80,0"
+                              BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="2,0,0,0" Padding="10,1,0,1">
+                        <StackPanel Spacing="4">
+                          <Button Classes="ghost" Padding="6,3" CornerRadius="4" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                  Command="{Binding ToggleToolCommand}">
+                            <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
+                              <TextBlock Grid.Column="0" Text="⚙" FontSize="11" Foreground="{DynamicResource WinToolAccentBrush}"
+                                         Width="16" TextAlignment="Center" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                              <TextBlock Grid.Column="1" Text="{Binding ToolDisplayTitle}" FontSize="12" FontWeight="Medium"
+                                         Foreground="{DynamicResource WinTextSecondaryBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                              <TextBlock Grid.Column="2" Text="{Binding ToolPreviewLine}" FontSize="11.5" Foreground="{DynamicResource WinTextTertiaryBrush}"
+                                         TextTrimming="CharacterEllipsis" VerticalAlignment="Center" IsVisible="{Binding !IsToolExpanded}"/>
+                              <TextBlock Grid.Column="3" Text="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.Running}" IsVisible="{Binding IsToolRunning}" FontSize="11" Foreground="{DynamicResource WinAccentTextBrush}" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                              <TextBlock Grid.Column="4" Text="{Binding ToolChevron}" FontSize="11" Foreground="{DynamicResource WinTextTertiaryBrush}" VerticalAlignment="Center" Margin="8,0,2,0"/>
+                            </Grid>
+                          </Button>
+                          <Border IsVisible="{Binding IsToolExpanded}" Margin="22,0,0,4"
+                                  Background="{DynamicResource WinToolCardFillBrush}" BorderBrush="{DynamicResource WinToolCardStrokeBrush}"
+                                  BorderThickness="1" CornerRadius="6" Padding="12,8">
+                            <StackPanel Spacing="6">
+                              <TextBlock Text="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.Arguments}" FontSize="11" Foreground="{DynamicResource WinTextTertiaryBrush}"
+                                         IsVisible="{Binding Tool.Input, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                              <SelectableTextBlock Text="{Binding Tool.Input}" TextWrapping="Wrap" FontSize="11.5" FontFamily="{StaticResource WinMonoFontFamily}"
+                                                   Foreground="{DynamicResource WinTextPrimaryBrush}"
+                                                   IsVisible="{Binding Tool.Input, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                              <TextBlock Text="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.Output}" FontSize="11" Foreground="{DynamicResource WinTextTertiaryBrush}"
+                                         IsVisible="{Binding Tool.Output, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                              <SelectableTextBlock Text="{Binding Tool.Output}" TextWrapping="Wrap" FontSize="11.5" FontFamily="{StaticResource WinMonoFontFamily}" MaxHeight="240"
+                                                   Foreground="{DynamicResource WinTextPrimaryBrush}"
+                                                   IsVisible="{Binding Tool.Output, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                            </StackPanel>
+                          </Border>
+                        </StackPanel>
+                      </Border>
+
+                      <!-- Command Approval Card -->
+                      <Border IsVisible="{Binding IsApproval}" HorizontalAlignment="Left" MaxWidth="740"
+                              Background="{DynamicResource WinApprovalFillBrush}" BorderBrush="{DynamicResource WinApprovalStrokeBrush}"
+                              BorderThickness="1" CornerRadius="8" Padding="14,12">
+                        <StackPanel Spacing="8">
+                          <TextBlock Text="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.ApprovalRequired}" FontWeight="Bold" FontSize="13" Foreground="{DynamicResource WinErrorBannerTextBrush}"/>
+                          <Border Background="{DynamicResource WinCodeBackBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="1" CornerRadius="4" Padding="10,8">
+                            <SelectableTextBlock Text="{Binding Approval.Command}" TextWrapping="Wrap" FontFamily="{StaticResource WinMonoFontFamily}" FontSize="12.5" Foreground="{DynamicResource WinTextPrimaryBrush}"/>
+                          </Border>
+                          <TextBlock Text="{Binding Approval.Description}" IsVisible="{Binding Approval.Description, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                     TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                          <StackPanel IsVisible="{Binding IsApprovalPending}" Spacing="8">
+                            <TextBox Text="{Binding ApprovalSteerText}" Watermark="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.ApprovalSteerWatermark}"/>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                              <Button Classes="accent" Content="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.RunCommand}"
+                                      Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ApproveCommandCommand}"
+                                      CommandParameter="{Binding}"/>
+                              <Button Classes="subtle" Content="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.RejectSteer}"
+                                      Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).RejectCommandCommand}"
+                                      CommandParameter="{Binding}"/>
+                            </StackPanel>
+                          </StackPanel>
+                          <TextBlock IsVisible="{Binding !IsApprovalPending}" Text="{Binding Approval.Choice, FallbackValue='Resolved'}"
+                                     FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                        </StackPanel>
+                      </Border>
+
+                      <!-- Clarify Card -->
+                      <Border IsVisible="{Binding IsClarify}" HorizontalAlignment="Left" MaxWidth="740"
+                              Background="{DynamicResource WinClarifyFillBrush}" BorderBrush="{DynamicResource WinClarifyStrokeBrush}"
+                              BorderThickness="1" CornerRadius="8" Padding="14,12">
+                        <StackPanel Spacing="8">
+                          <TextBlock Text="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.ClarificationNeeded}" FontWeight="Bold" FontSize="13" Foreground="{DynamicResource WinAccentTextBrush}"/>
+                          <TextBlock Text="{Binding Clarify.Question}" TextWrapping="Wrap" FontSize="13" Foreground="{DynamicResource WinTextPrimaryBrush}"/>
+                          <StackPanel IsVisible="{Binding IsClarifyPending}" Spacing="8">
+                            <ItemsControl ItemsSource="{Binding ClarifyChoices}">
+                              <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                  <WrapPanel Orientation="Horizontal"/>
+                                </ItemsPanelTemplate>
+                              </ItemsControl.ItemsPanel>
+                              <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="models:ClarifyChoice">
+                                  <Button Classes="subtle" Margin="0,0,6,6" Content="{Binding Label}"
+                                          Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).AnswerClarifyChoiceCommand}">
+                                    <Button.CommandParameter>
+                                      <MultiBinding Converter="{x:Static conv:ClarifyChoiceCommandParameterConverter.Instance}">
+                                        <Binding Path="$parent[ItemsControl].DataContext"/>
+                                        <Binding Path="."/>
+                                      </MultiBinding>
+                                    </Button.CommandParameter>
+                                  </Button>
+                                </DataTemplate>
+                              </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <Grid ColumnDefinitions="*,Auto">
+                              <TextBox Grid.Column="0" Text="{Binding ClarifyCustomAnswer}" Watermark="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.ClarifyCustomWatermark}"/>
+                              <Button Grid.Column="1" Classes="accent" Content="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.Submit}" Margin="8,0,0,0"
+                                      Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SubmitClarifyCustomCommand}"
+                                      CommandParameter="{Binding}"/>
+                            </Grid>
+                          </StackPanel>
+                          <TextBlock IsVisible="{Binding !IsClarifyPending}" Text="{Binding Clarify.SelectedAnswer, FallbackValue='Answered'}"
+                                     FontSize="12" FontWeight="SemiBold" Foreground="#AAFFFFFF"/>
+                        </StackPanel>
+                      </Border>
+
+                      <!-- System Notice -->
+                      <TextBlock IsVisible="{Binding IsSystem}" Text="{Binding Content}" FontSize="12" Foreground="#99FF9B8C" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+                <Border IsVisible="{Binding IsRunningTurn}" HorizontalAlignment="Left" Margin="8,6,0,6"
+                        Background="{DynamicResource WinCardSecondaryBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}"
+                        BorderThickness="1" CornerRadius="6" Padding="12,7">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Border Width="8" Height="8" CornerRadius="4" Background="{DynamicResource WinAccentFillBrush}" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding Loc.AgentWorkingNotice}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}" VerticalAlignment="Center"/>
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+            </ScrollViewer>
+
+            <!-- Composer Bar -->
+            <Border Grid.Row="2" Classes="card" Padding="10" Margin="0,10,0,0">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBox Grid.Column="0" x:Name="ComposerInput" Text="{Binding ComposerText}"
+                         AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="140"
+                         Watermark="{Binding Loc.ComposerWatermark}"
+                         KeyDown="OnComposerKeyDown"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Bottom" Margin="8,0,0,0">
+                  <Button Classes="subtle" Content="{Binding Loc.StopTurn}" IsVisible="{Binding IsRunningTurn}" Command="{Binding InterruptTurnCommand}"/>
+                  <Button Classes="subtle" Content="{Binding Loc.Steer}" IsVisible="{Binding IsRunningTurn}" Command="{Binding SteerTurnCommand}"/>
+                  <Button Classes="accent" Content="{Binding Loc.Queue}" IsVisible="{Binding IsRunningTurn}" Command="{Binding SendOrQueueCommand}"/>
+                  <Button Classes="accent" Content="{Binding Loc.Send}" IsVisible="{Binding !IsRunningTurn}" Command="{Binding SendOrQueueCommand}"/>
+                </StackPanel>
+              </Grid>
+            </Border>
+          </Grid>
+
+          <!-- Optional Beside Chat Pane -->
+          <Border Grid.Column="2" Width="370" IsVisible="{Binding IsBesideVisible}"
+                  Background="{DynamicResource WinLayerFillBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="1,0,0,0" Padding="12">
+            <Grid RowDefinitions="Auto,*,Auto">
+              <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto,Auto" Margin="0,0,0,10">
+                <TextBlock Grid.Column="0" Text="{Binding BesideSessionDisplayTitle}"
+                           FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                <Button Grid.Column="1" Classes="subtle" Content="{Binding Loc.Pop}" Padding="8,4" FontSize="11" Click="OnPopOutBesideClick" Margin="4,0,0,0"/>
+                <Button Grid.Column="2" Classes="subtle" Content="{Binding Loc.Swap}" Padding="8,4" FontSize="11" Command="{Binding SwapBesideChatCommand}" Margin="4,0,0,0"/>
+                <Button Grid.Column="3" Classes="subtle" Content="✕" Padding="8,4" FontSize="11" Command="{Binding CloseBesideChatCommand}" Margin="4,0,0,0"/>
+              </Grid>
+
+              <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                <ItemsControl ItemsSource="{Binding BesideMessages}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:MessageItemViewModel">
+                      <Border Margin="0,0,0,8" Padding="10,8" CornerRadius="4"
+                              Background="{DynamicResource WinCardFillBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="1">
+                        <StackPanel Spacing="4">
+                          <TextBlock Text="{Binding Role}" FontSize="10" Foreground="{DynamicResource WinAccentTextBrush}" FontWeight="SemiBold"/>
+                          <controls:AttachmentGalleryView IsVisible="{Binding HasAttachments}"
+                                                        Attachments="{Binding Attachments}"
+                                                        MediaBytesLoader="{Binding $parent[Window].((vm:MainViewModel)DataContext).MediaBytesLoader}"
+                                                        ImageClickCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenImageViewerCommand}"
+                                                        FileClickCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenPreviewFileCommand}"/>
+                          <controls:MarkdownView IsVisible="{Binding HasVisibleContent}"
+                                                 Markdown="{Binding Content}"
+                                                 PreviewCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenInAppPreviewCommand}"
+                                                 BrowserCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenPreviewFileCommand}"
+                                                 MediaBytesLoader="{Binding $parent[Window].((vm:MainViewModel)DataContext).MediaBytesLoader}"
+                                                 ImageViewerCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenImageViewerCommand}"/>
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </ScrollViewer>
+
+              <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,10,0,0">
+                <TextBox Grid.Column="0" Text="{Binding BesideComposerText}" Watermark="{Binding Loc.QuickMessageWatermark}"/>
+                <Button Grid.Column="1" Classes="accent" Content="{Binding Loc.Send}" Command="{Binding SendBesideQuickMessageCommand}" Margin="6,0,0,0"/>
+              </Grid>
+            </Grid>
+          </Border>
+
+          <!-- Dedicated In-App HTML Preview Side Pane (zero ScrollViewer airspace overlap) -->
+          <Border Grid.Column="3" Width="560" IsVisible="{Binding IsHtmlPreviewPaneOpen}"
+                  Background="{DynamicResource WinLayerFillBrush}" BorderBrush="{DynamicResource WinAccentStrokeBrush}" BorderThickness="1,0,0,0" Padding="12">
+            <Grid RowDefinitions="Auto,*">
+              <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto,Auto" Margin="0,0,0,10">
+                <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,8,0">
+                  <TextBlock Text="{Binding HtmlPreviewTitle}" FontWeight="SemiBold" FontSize="13.5" Foreground="{DynamicResource WinAccentTextBrush}" TextTrimming="CharacterEllipsis"/>
+                  <TextBlock Text="{Binding HtmlPreviewFilePath}" FontSize="10.5" Foreground="{DynamicResource WinTextTertiaryBrush}" TextTrimming="CharacterEllipsis"/>
+                </StackPanel>
+
+                <!-- Zoom Strip -->
+                <Border Grid.Column="1" CornerRadius="4" BorderBrush="{DynamicResource WinControlStrokeBrush}" BorderThickness="1" Margin="0,0,6,0" VerticalAlignment="Center">
+                  <StackPanel Orientation="Horizontal">
+                    <Button Classes="ghost" Content="−" FontSize="13" Padding="8,4" Command="{Binding ZoomOutHtmlPreviewCommand}"/>
+                    <Button Classes="ghost" Content="{Binding HtmlPreviewZoomLabel}" FontSize="11.5" Padding="8,4" MinWidth="48" HorizontalContentAlignment="Center"
+                            ToolTip.Tip="{Binding Loc.ToggleZoomTip}" Command="{Binding ResetHtmlPreviewZoomCommand}"/>
+                    <Button Classes="ghost" Content="+" FontSize="13" Padding="8,4" Command="{Binding ZoomInHtmlPreviewCommand}"/>
+                  </StackPanel>
+                </Border>
+
+                <Button Grid.Column="2" Classes="accent" Content="{Binding Loc.Browser}" Padding="10,5" FontSize="11.5"
+                        Command="{Binding OpenCurrentPreviewInBrowserCommand}" Margin="0,0,6,0"/>
+                <Button Grid.Column="3" Classes="subtle" Content="✕" Padding="8,5" FontSize="11.5"
+                        Command="{Binding CloseHtmlPreviewPaneCommand}"/>
+              </Grid>
+
+              <Border Grid.Row="1" CornerRadius="4" ClipToBounds="True" Background="#FFFFFF"
+                      BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="1"
+                      IsVisible="{Binding IsHtmlPreviewWebViewVisible}">
+                <webview:WebView x:Name="InlinePreviewWebView"/>
+              </Border>
+            </Grid>
+          </Border>
+        </Grid>
+
+        <!-- 2. BOTS TAB -->
+        <ScrollViewer IsVisible="{Binding IsBotsTab}" VerticalScrollBarVisibility="Auto">
+          <StackPanel Spacing="16" Margin="24">
+            <Grid ColumnDefinitions="*,Auto,Auto">
+              <TextBlock Grid.Column="0" Text="{Binding Loc.BotsAndProfilesTitle}" FontSize="20" FontWeight="SemiBold"
+                         VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,16,0"/>
+              <Button Grid.Column="1" Classes="accent" Content="{Binding Loc.NewSoulBotBtn}" Command="{Binding OpenCreateSoulModalCommand}" Margin="0,0,8,0"/>
+              <Button Grid.Column="2" Classes="subtle" Content="{Binding Loc.Refresh}" Command="{Binding RefreshProfilesAndSessionsCommand}"/>
+            </Grid>
+            <ItemsControl ItemsSource="{Binding ProfileChips}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <WrapPanel Orientation="Horizontal"/>
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:ProfileOptionViewModel">
+                  <Border Classes="card" Width="320" Margin="0,0,12,12" Padding="16">
+                    <StackPanel Spacing="10">
+                      <StackPanel Orientation="Horizontal" Spacing="10">
+                        <Border Width="36" Height="36" CornerRadius="18" Background="{DynamicResource WinAccentFillBrush}">
+                          <TextBlock Text="{Binding Initial}" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource WinAccentForegroundBrush}"
+                                     HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <StackPanel VerticalAlignment="Center">
+                          <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="{Binding DisplayName}" FontSize="15" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding Name, StringFormat='@{0}'}" FontSize="11.5" Foreground="{DynamicResource WinTextTertiaryBrush}" VerticalAlignment="Center"/>
+                          </StackPanel>
+                          <TextBlock Text="{Binding ModelDisplay}" FontSize="11.5" Foreground="{DynamicResource WinAccentTextBrush}"/>
+                        </StackPanel>
+                      </StackPanel>
+                      <TextBlock Text="{Binding DescriptionDisplay}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}" TextWrapping="Wrap" MaxLines="3"/>
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Button Classes="accent" Content="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.OpenChatsBtn}"
+                                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenBotChatCommand}"
+                                CommandParameter="{Binding}"/>
+                        <Button Classes="subtle" Content="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.NewChat}"
+                                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).NewChatWithBotCommand}"
+                                CommandParameter="{Binding}"/>
+                        <Button Classes="subtle" Content="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.SoulMdBtn}"
+                                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenSoulEditorForProfileCommand}"
+                                CommandParameter="{Binding}"/>
+                      </StackPanel>
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </ScrollViewer>
+
+        <!-- 3. TASKS TAB (Live Cron Jobs + Kanban Boards) -->
+        <ScrollViewer IsVisible="{Binding IsTasksTab}" VerticalScrollBarVisibility="Auto">
+          <StackPanel Spacing="16" Margin="24">
+            <Grid ColumnDefinitions="*,Auto,Auto">
+              <TextBlock Grid.Column="0" Text="{Binding Loc.TasksTitle}" FontSize="20" FontWeight="SemiBold"
+                         VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,16,0"/>
+              <Button Grid.Column="1" Classes="accent" Content="{Binding Loc.NewJobBtn}" Command="{Binding OpenCreateCronJobModalCommand}" Margin="0,0,8,0"/>
+              <Button Grid.Column="2" Classes="subtle" Content="{Binding Loc.RefreshTasks}" Command="{Binding RefreshTasksTabCommand}"/>
+            </Grid>
+
+            <TextBlock Text="{Binding TasksStatusNotice}"
+                       IsVisible="{Binding TasksStatusNotice, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                       Foreground="{DynamicResource WinErrorBannerTextBrush}" FontSize="12"/>
+
+            <TextBlock Text="{Binding Loc.ScheduledJobs}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource WinAccentTextBrush}"/>
+            <ItemsControl ItemsSource="{Binding CronJobs}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="models:CronJobSummary">
+                  <Border Classes="card" Padding="14" Margin="0,0,0,8">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <StackPanel Grid.Column="0" Spacing="3" Margin="0,0,12,0">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                          <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="14"/>
+                          <Border Background="{DynamicResource WinAccentSoftBrush}" BorderBrush="{DynamicResource WinAccentStrokeBrush}" BorderThickness="1" CornerRadius="4" Padding="6,1" IsVisible="{Binding Enabled}">
+                            <TextBlock Text="ON" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource WinAccentTextBrush}"/>
+                          </Border>
+                          <Border Background="{DynamicResource WinControlFillBrush}" BorderBrush="{DynamicResource WinControlStrokeBrush}" BorderThickness="1" CornerRadius="4" Padding="6,1" IsVisible="{Binding !Enabled}">
+                            <TextBlock Text="OFF" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource WinTextTertiaryBrush}"/>
+                          </Border>
+                        </StackPanel>
+                        <TextBlock Text="{Binding ScheduleDisplay}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                        <TextBlock Text="{Binding Prompt}" FontSize="11.5" Foreground="{DynamicResource WinTextTertiaryBrush}" TextTrimming="CharacterEllipsis" MaxLines="2"/>
+                      </StackPanel>
+                      <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <Button Classes="subtle" Content="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.Edit}"
+                                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenEditCronJobModalCommand}"
+                                CommandParameter="{Binding}"/>
+                        <Button Classes="subtle" Content="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.RunNow}"
+                                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).TriggerCronJobCommand}"
+                                CommandParameter="{Binding}"/>
+                        <Button Classes="subtle" Content="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.PauseResume}"
+                                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ToggleCronJobCommand}"
+                                CommandParameter="{Binding}"/>
+                      </StackPanel>
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <TextBlock Text="{Binding Loc.KanbanBoards}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource WinAccentTextBrush}" Margin="0,8,0,0"/>
+            <ComboBox ItemsSource="{Binding KanbanBoards}" SelectedItem="{Binding SelectedKanbanBoard}" MinWidth="260">
+              <ComboBox.ItemTemplate>
+                <DataTemplate x:DataType="models:KanbanBoardSummary">
+                  <TextBlock Text="{Binding Title}"/>
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+
+            <ItemsControl ItemsSource="{Binding KanbanTasks}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="models:KanbanTaskSummary">
+                  <Border Classes="card" Padding="12" Margin="0,0,0,8">
+                    <StackPanel Spacing="4">
+                      <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Text="{Binding Title}" FontWeight="SemiBold"/>
+                        <Border Grid.Column="1" Background="{DynamicResource WinAccentSoftBrush}" BorderBrush="{DynamicResource WinAccentStrokeBrush}" BorderThickness="1" CornerRadius="4" Padding="8,2">
+                          <TextBlock Text="{Binding Status}" FontSize="11" Foreground="{DynamicResource WinAccentTextBrush}"/>
+                        </Border>
+                      </Grid>
+                      <TextBlock Text="{Binding LatestSummary}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}" TextWrapping="Wrap"/>
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </ScrollViewer>
+
+        <!-- 4. PULSE TAB -->
+        <ScrollViewer IsVisible="{Binding IsPulseTab}" VerticalScrollBarVisibility="Auto">
+          <StackPanel Spacing="12" Margin="24">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Grid.Column="0" Text="{Binding Loc.PulseTitle}" FontSize="20" FontWeight="SemiBold"
+                         VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,16,0"/>
+              <Button Grid.Column="1" Classes="subtle" Content="{Binding Loc.Refresh}" Command="{Binding RefreshPulseTabCommand}"/>
+            </Grid>
+            <TextBlock Text="{Binding PulseStatusNotice}" IsVisible="{Binding PulseStatusNotice, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+            <ItemsControl ItemsSource="{Binding PulseItems}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="models:PulseItemSummary">
+                  <Border Classes="card" Padding="14" Margin="0,0,0,8">
+                    <StackPanel Spacing="6">
+                      <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="15"/>
+                      <TextBlock Text="{Binding Body}" TextWrapping="Wrap" FontSize="13" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </ScrollViewer>
+
+        <!-- 5. ARTIFACTS TAB -->
+        <ScrollViewer IsVisible="{Binding IsArtifactsTab}" VerticalScrollBarVisibility="Auto">
+          <StackPanel Spacing="12" Margin="24">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Grid.Column="0" Text="{Binding Loc.ArtifactsTitle}" FontSize="20" FontWeight="SemiBold"
+                         VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,16,0"/>
+              <Button Grid.Column="1" Classes="subtle" Content="{Binding Loc.Refresh}" Command="{Binding RefreshArtifactsTabCommand}"/>
+            </Grid>
+            <TextBlock Text="{Binding ArtifactsStatusNotice}" IsVisible="{Binding ArtifactsStatusNotice, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+            <ItemsControl ItemsSource="{Binding ArtifactItems}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="models:ArtifactSummary">
+                  <Border Classes="card" Padding="14" Margin="0,0,0,8">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <StackPanel Grid.Column="0" Spacing="2">
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                        <TextBlock Text="{Binding Path}" FontSize="11.5" Foreground="{DynamicResource WinTextTertiaryBrush}"/>
+                      </StackPanel>
+                      <Button Grid.Column="1" Classes="subtle" Content="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.Open}"
+                              Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenArtifactItemCommand}"
+                              CommandParameter="{Binding}"/>
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </ScrollViewer>
+
+        <!-- 6. SETTINGS TAB -->
+        <ScrollViewer IsVisible="{Binding IsSettingsTab}" VerticalScrollBarVisibility="Auto">
+          <StackPanel Spacing="16" MaxWidth="920" HorizontalAlignment="Stretch" Margin="24">
+            <TextBlock Text="{Binding Loc.SettingsTitle}" FontSize="20" FontWeight="SemiBold"/>
+
+            <Border Classes="card" Padding="16">
+              <StackPanel Spacing="10">
+                <TextBlock Text="{Binding Loc.ThemeSectionTitle}" FontWeight="SemiBold" FontSize="14"/>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Button CornerRadius="4" Padding="12,6" BorderThickness="1"
+                          Content="{Binding Loc.ThemeFollowSystem}"
+                          Background="{Binding IsSystemTheme, Converter={x:Static conv:BoolToAccentBrushConverter.Instance}}"
+                          BorderBrush="{Binding IsSystemTheme, Converter={x:Static conv:BoolToBorderBrushConverter.Instance}}"
+                          Command="{Binding SelectSystemThemeCommand}"/>
+                  <Button CornerRadius="4" Padding="12,6" BorderThickness="1"
+                          Content="{Binding Loc.ThemeDark}"
+                          Background="{Binding IsDarkTheme, Converter={x:Static conv:BoolToAccentBrushConverter.Instance}}"
+                          BorderBrush="{Binding IsDarkTheme, Converter={x:Static conv:BoolToBorderBrushConverter.Instance}}"
+                          Command="{Binding SelectDarkThemeCommand}"/>
+                  <Button CornerRadius="4" Padding="12,6" BorderThickness="1"
+                          Content="{Binding Loc.ThemeLight}"
+                          Background="{Binding IsLightTheme, Converter={x:Static conv:BoolToAccentBrushConverter.Instance}}"
+                          BorderBrush="{Binding IsLightTheme, Converter={x:Static conv:BoolToBorderBrushConverter.Instance}}"
+                          Command="{Binding SelectLightThemeCommand}"/>
+                </StackPanel>
+                <TextBlock Text="{Binding Loc.ThemeHint}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}" TextWrapping="Wrap"/>
+              </StackPanel>
+            </Border>
+
+            <Border Classes="card" Padding="16">
+              <StackPanel Spacing="10">
+                <TextBlock Text="{Binding Loc.LanguageSectionTitle}" FontWeight="SemiBold" FontSize="14"/>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Button CornerRadius="4" Padding="12,6" BorderThickness="1"
+                          Content="{Binding Loc.LanguageFollowSystem}"
+                          Background="{Binding IsSystemLanguage, Converter={x:Static conv:BoolToAccentBrushConverter.Instance}}"
+                          BorderBrush="{Binding IsSystemLanguage, Converter={x:Static conv:BoolToBorderBrushConverter.Instance}}"
+                          Command="{Binding SelectSystemLanguageCommand}"/>
+                  <Button CornerRadius="4" Padding="12,6" BorderThickness="1"
+                          Content="{Binding Loc.LanguageEnglish}"
+                          Background="{Binding IsEnglishLanguage, Converter={x:Static conv:BoolToAccentBrushConverter.Instance}}"
+                          BorderBrush="{Binding IsEnglishLanguage, Converter={x:Static conv:BoolToBorderBrushConverter.Instance}}"
+                          Command="{Binding SelectEnglishLanguageCommand}"/>
+                  <Button CornerRadius="4" Padding="12,6" BorderThickness="1"
+                          Content="{Binding Loc.LanguageChinese}"
+                          Background="{Binding IsChineseLanguage, Converter={x:Static conv:BoolToAccentBrushConverter.Instance}}"
+                          BorderBrush="{Binding IsChineseLanguage, Converter={x:Static conv:BoolToBorderBrushConverter.Instance}}"
+                          Command="{Binding SelectChineseLanguageCommand}"/>
+                </StackPanel>
+                <TextBlock Text="{Binding Loc.LanguageHint}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}" TextWrapping="Wrap"/>
+              </StackPanel>
+            </Border>
+
+            <Border Classes="card" Padding="16">
+              <StackPanel Spacing="10">
+                <TextBlock Text="{Binding Loc.ProfilePersonalityTitle}" FontWeight="SemiBold" FontSize="14"/>
+                <TextBlock Text="{Binding ActiveProfileDisplayLabel}" FontSize="12.5" Foreground="{DynamicResource WinAccentTextBrush}"/>
+                <TextBlock Text="{Binding Loc.ProfilePersonalityDesc}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}" TextWrapping="Wrap"/>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Button Classes="accent" Content="{Binding Loc.EditActiveSoulBtn}" Command="{Binding OpenActiveProfileSoulEditorCommand}"/>
+                  <Button Classes="subtle" Content="{Binding Loc.NewSoulBotBtn}" Command="{Binding OpenCreateSoulModalCommand}"/>
+                </StackPanel>
+              </StackPanel>
+            </Border>
+
+            <Border Classes="card" Padding="16">
+              <StackPanel Spacing="10">
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Grid.Column="0" Text="{Binding Loc.HermesServerTitle}" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center"/>
+                  <Border Grid.Column="1" CornerRadius="4" Padding="8,3"
+                          Background="{DynamicResource WinControlFillBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="1">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <TextBlock Text="{Binding Loc.ServerVersionLabel}" FontSize="11" Foreground="{DynamicResource WinTextTertiaryBrush}"/>
+                      <TextBlock Text="{Binding HermesVersionLabel}" FontSize="11.5" FontWeight="SemiBold"
+                                 FontFamily="{StaticResource WinMonoFontFamily}" Foreground="{DynamicResource WinTextPrimaryBrush}"/>
+                    </StackPanel>
+                  </Border>
+                </Grid>
+
+                <TextBlock Text="{Binding Loc.HermesServerDesc}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}" TextWrapping="Wrap"/>
+
+                <TextBlock Text="{Binding HermesUpdateStatusText}"
+                           IsVisible="{Binding HermesUpdateStatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                           FontSize="12.5" FontWeight="Medium" Foreground="{DynamicResource WinAccentTextBrush}" TextWrapping="Wrap"/>
+
+                <Border IsVisible="{Binding HermesUpdateCommitsSummary, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                        Background="{DynamicResource WinCardSecondaryBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}"
+                        BorderThickness="1" CornerRadius="4" Padding="10,8">
+                  <SelectableTextBlock Text="{Binding HermesUpdateCommitsSummary}" FontSize="11.5" LineHeight="18"
+                                       Foreground="{DynamicResource WinTextSecondaryBrush}" TextWrapping="Wrap"/>
+                </Border>
+
+                <SelectableTextBlock Text="{Binding HermesUpdateDetailText}"
+                                     IsVisible="{Binding HermesUpdateDetailText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                     FontSize="11.5" FontFamily="{StaticResource WinMonoFontFamily}"
+                                     Foreground="{DynamicResource WinTextSecondaryBrush}" TextWrapping="Wrap"/>
+
+                <Border IsVisible="{Binding HermesUpdateManualCommand, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                        Background="{DynamicResource WinToolCardFillBrush}" BorderBrush="{DynamicResource WinToolCardStrokeBrush}"
+                        BorderThickness="1" CornerRadius="4" Padding="10,6">
+                  <SelectableTextBlock Text="{Binding HermesUpdateManualCommand}" FontSize="12"
+                                       FontFamily="{StaticResource WinMonoFontFamily}" Foreground="{DynamicResource WinTextPrimaryBrush}" TextWrapping="Wrap"/>
+                </Border>
+
+                <TextBlock Text="{Binding GatewayMaintainStatusText}"
+                           IsVisible="{Binding GatewayMaintainStatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                           FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}" TextWrapping="Wrap"/>
+
+                <WrapPanel Orientation="Horizontal">
+                  <Button Classes="subtle" Content="{Binding Loc.ManageServersBtn}" Margin="0,0,8,6"
+                          Command="{Binding OpenConnectPanelCommand}"/>
+                  <Button Classes="subtle" Content="{Binding Loc.CheckForUpdates}" Margin="0,0,8,6"
+                          Command="{Binding CheckHermesUpdateCommand}" IsEnabled="{Binding IsServerMaintenanceIdle}"/>
+                  <Button Classes="accent" Content="{Binding Loc.UpdateHermes}" Margin="0,0,8,6"
+                          IsVisible="{Binding ShowUpdateHermesButton}"
+                          Command="{Binding RequestHermesUpdateCommand}" IsEnabled="{Binding IsServerMaintenanceIdle}"/>
+                  <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,8,6" IsVisible="{Binding HasHermesUpdateConfirm}">
+                    <Button Classes="accent" Content="{Binding Loc.ConfirmUpdateHermes}"
+                            Command="{Binding ConfirmHermesUpdateCommand}" IsEnabled="{Binding IsServerMaintenanceIdle}"/>
+                    <Button Classes="subtle" Content="{Binding Loc.Cancel}"
+                            Command="{Binding CancelHermesUpdateConfirmCommand}"/>
+                  </StackPanel>
+                  <Button Classes="subtle" Content="{Binding Loc.RestartGateway}" Margin="0,0,0,6"
+                          Command="{Binding RestartGatewayCommand}" IsEnabled="{Binding IsServerMaintenanceIdle}"/>
+                </WrapPanel>
+              </StackPanel>
+            </Border>
+
+            <Border Classes="card" Padding="16">
+              <StackPanel Spacing="10">
+                <TextBlock Text="{Binding Loc.LocalDataTitle}" FontWeight="SemiBold" FontSize="14"/>
+                <SelectableTextBlock Text="{Binding DataDirectoryPath}" FontFamily="{StaticResource WinMonoFontFamily}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                <TextBlock Text="{Binding Loc.PortableModeNotice}" IsVisible="{Binding IsPortableMode}" FontSize="12" Foreground="{DynamicResource WinAccentTextBrush}"/>
+                <TextBlock Text="{Binding Loc.DpapiStorageDesc}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}" TextWrapping="Wrap"/>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Button Classes="subtle" Content="{Binding Loc.OpenDataFolder}" Command="{Binding OpenDataFolderCommand}"/>
+                  <Button Classes="subtle" Content="{Binding Loc.DiagnosticsLog}" Command="{Binding OpenDiagnosticsLogCommand}"/>
+                </StackPanel>
+              </StackPanel>
+            </Border>
+
+            <Border Classes="card" Padding="16">
+              <StackPanel Spacing="10">
+                <TextBlock Text="{Binding Loc.V2NavigationTabs}" FontWeight="SemiBold" FontSize="14"/>
+                <ItemsControl ItemsSource="{Binding AllConfigurableTabs}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:V2TabOptionViewModel">
+                      <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,4">
+                        <TextBlock Grid.Column="0" Text="{Binding Label}" VerticalAlignment="Center"/>
+                        <Button Grid.Column="1" Classes="subtle" Content="↑" Margin="0,0,6,0"
+                                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).MoveTabUpCommand}"
+                                CommandParameter="{Binding}"/>
+                        <Button Grid.Column="2" Classes="subtle" Content="{Binding VisibilityLabel}"
+                                IsEnabled="{Binding CanHide}"
+                                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ToggleTabVisibilityCommand}"
+                                CommandParameter="{Binding}"/>
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+      </Grid>
+      </Border>
+    </Grid>
+
+    <!-- Footer -->
+    <Border Grid.Row="2" Padding="14,5" Background="Transparent">
+      <TextBlock Text="{Binding Loc.FooterText}" FontSize="11" Foreground="{DynamicResource WinTextTertiaryBrush}"/>
+    </Border>
+
+    <!-- File / Text Preview Modal (Fluent 2 ContentDialog 8px + Smoke scrim) -->
+    <Border Grid.RowSpan="3" IsVisible="{Binding IsPreviewModalOpen}" Background="{DynamicResource WinSmokeScrimBrush}">
+      <Border Classes="dialog" Width="760" MaxHeight="680" Padding="20" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <Grid RowDefinitions="Auto,*">
+          <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,12">
+            <TextBlock Grid.Column="0" Text="{Binding PreviewTitle}" FontSize="16" FontWeight="SemiBold"/>
+            <Button Grid.Column="1" Classes="subtle" Content="{Binding Loc.Close}" Command="{Binding ClosePreviewModalCommand}"/>
+          </Grid>
+          <ScrollViewer Grid.Row="1">
+            <SelectableTextBlock Text="{Binding PreviewText}" FontFamily="{StaticResource WinMonoFontFamily}" FontSize="12.5" TextWrapping="Wrap"/>
+          </ScrollViewer>
+        </Grid>
+      </Border>
+    </Border>
+
+    <!-- Full-Size Image Lightbox Overlay -->
+    <Border Grid.RowSpan="3" IsVisible="{Binding IsImageViewerOpen}" Background="{DynamicResource WinSmokeScrimBrush}">
+      <Border Classes="dialog" Width="920" Height="700" MaxWidth="1120" MaxHeight="820"
+              Padding="18" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <Grid RowDefinitions="Auto,*">
+          <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,12">
+            <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,12,0">
+              <TextBlock Text="{Binding ImageViewerTitle}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource WinTextPrimaryBrush}" TextTrimming="CharacterEllipsis"/>
+              <TextBlock Text="{Binding ImageViewerUri}" FontSize="11" Foreground="{DynamicResource WinTextTertiaryBrush}" TextTrimming="CharacterEllipsis"/>
+            </StackPanel>
+            <Button Grid.Column="1" Classes="accent" Content="{Binding Loc.OpenExternally}" Command="{Binding OpenImageExternallyCommand}" Margin="0,0,8,0"/>
+            <Button Grid.Column="2" Classes="subtle" Content="{Binding Loc.Close}" Command="{Binding CloseImageViewerCommand}"/>
+          </Grid>
+          <Border Grid.Row="1" Background="{DynamicResource WinCodeBackBrush}" CornerRadius="4" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="1" ClipToBounds="True">
+            <Grid>
+              <TextBlock Text="{Binding Loc.LoadingImage}" FontSize="13" Foreground="{DynamicResource WinTextSecondaryBrush}"
+                         HorizontalAlignment="Center" VerticalAlignment="Center"
+                         IsVisible="{Binding ImageViewerBitmap, Converter={x:Static ObjectConverters.IsNull}}"/>
+              <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+                            IsVisible="{Binding ImageViewerBitmap, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <Image Source="{Binding ImageViewerBitmap}" Stretch="Uniform" MaxHeight="620" MaxWidth="880"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              </ScrollViewer>
+            </Grid>
+          </Border>
+        </Grid>
+      </Border>
+    </Border>
+
+    <!-- Multi-Soul / Profile SOUL.md Editor & Creator Overlay -->
+    <Border Grid.RowSpan="3" IsVisible="{Binding IsSoulEditorOpen}" Background="{DynamicResource WinSmokeScrimBrush}">
+      <Border Classes="dialog" Width="820" Height="640" ClipToBounds="True"
+              HorizontalAlignment="Center" VerticalAlignment="Center">
+        <Grid RowDefinitions="Auto,*,Auto" Height="640">
+          <!-- Header -->
+          <Border Grid.Row="0" Padding="20,14" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="0,0,0,1" Background="{DynamicResource WinDialogFooterBrush}">
+            <Grid ColumnDefinitions="*,Auto,Auto">
+              <StackPanel Grid.Column="0" Spacing="2">
+                <TextBlock Text="{Binding SoulEditorHeaderTitle}" FontSize="17" FontWeight="SemiBold" Foreground="{DynamicResource WinTextPrimaryBrush}"/>
+                <TextBlock Text="{Binding Loc.SoulModalSubtitle}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+              </StackPanel>
+              <Button Grid.Column="1" Classes="subtle" Content="{Binding Loc.Reload}" IsVisible="{Binding !IsCreatingSoul}"
+                      Command="{Binding ReloadSoulFromServerCommand}" IsEnabled="{Binding !IsSoulEditorBusy}" Margin="0,0,8,0"/>
+              <Button Grid.Column="2" Classes="subtle" Content="✕" Command="{Binding CloseSoulEditorCommand}"/>
+            </Grid>
+          </Border>
+
+          <!-- Form Body -->
+          <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="12" Margin="20,16">
+              <!-- Sub-tab switcher when editing existing profile -->
+              <Border IsVisible="{Binding !IsCreatingSoul}" CornerRadius="4" Background="{DynamicResource WinCardSecondaryBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="1" Padding="3" HorizontalAlignment="Left">
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                  <Button Classes="ghost" Padding="12,5" CornerRadius="4" Content="{Binding Loc.SoulTabPersonality}"
+                          Background="{Binding IsSoulPersonalitySubTab, Converter={x:Static conv:BoolToAccentBrushConverter.Instance}}"
+                          Command="{Binding SelectSoulPersonalityTabCommand}"/>
+                  <Button Classes="ghost" Padding="12,5" CornerRadius="4" Content="{Binding Loc.SoulTabCapabilities}"
+                          Background="{Binding IsSoulCapabilitiesSubTab, Converter={x:Static conv:BoolToAccentBrushConverter.Instance}}"
+                          Command="{Binding SelectSoulCapabilitiesTabCommand}"/>
+                </StackPanel>
+              </Border>
+
+              <!-- Personality & Basic Settings Panel -->
+              <StackPanel Spacing="12" IsVisible="{Binding IsSoulPersonalitySubTab}">
+                <Grid ColumnDefinitions="*,*" IsVisible="{Binding IsCreatingSoul}">
+                  <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,8,0">
+                    <TextBlock Text="{Binding Loc.DisplayNameTitleLabel}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                    <TextBox Text="{Binding SoulEditorTitleInput}" Watermark="{Binding Loc.DisplayNameTitleWatermark}"/>
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Spacing="4" Margin="8,0,0,0">
+                    <TextBlock Text="{Binding Loc.ProfileSlugLabel}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                    <TextBox Text="{Binding SoulEditorSlugInput}" Watermark="{Binding Loc.ProfileSlugWatermark}"/>
+                  </StackPanel>
+                </Grid>
+
+                <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding !IsCreatingSoul}">
+                  <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,10,0">
+                    <TextBlock Text="{Binding Loc.DisplayTitleLabel}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                    <TextBox Text="{Binding SoulEditorTitleInput}" Watermark="{Binding Loc.DisplayTitleWatermark}"/>
+                  </StackPanel>
+                  <Button Grid.Column="1" Classes="subtle" Content="{Binding Loc.DuplicateAsNewSoul}" VerticalAlignment="Bottom"
+                          Command="{Binding DuplicateCurrentSoulCommand}" IsEnabled="{Binding !IsSoulEditorBusy}"/>
+                </Grid>
+
+                <StackPanel Spacing="4">
+                  <TextBlock Text="{Binding Loc.MissionDescriptionLabel}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                  <TextBox Text="{Binding SoulEditorDescription}" Watermark="{Binding Loc.MissionDescriptionWatermark}"/>
+                </StackPanel>
+
+                <Grid ColumnDefinitions="*,Auto,Auto" IsVisible="{Binding IsCreatingSoul}">
+                  <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,12,0">
+                    <TextBlock Text="{Binding Loc.StartFromLabel}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                    <ComboBox ItemsSource="{Binding SoulCloneOptions}" SelectedItem="{Binding SoulEditorCloneFrom}" HorizontalAlignment="Stretch"/>
+                  </StackPanel>
+                  <CheckBox Grid.Column="1" IsChecked="{Binding SoulEditorShareAuth}" Content="{Binding Loc.ShareAuth}" VerticalAlignment="Bottom" Margin="0,0,12,4"/>
+                  <CheckBox Grid.Column="2" IsChecked="{Binding SoulEditorNoSkills}" Content="{Binding Loc.NoSkills}" VerticalAlignment="Bottom" Margin="0,0,0,4"/>
+                </Grid>
+
+                <StackPanel Spacing="6">
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0" Text="SOUL.md" FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource WinAccentTextBrush}"/>
+                    <TextBlock Grid.Column="1" Text="{Binding SoulCharCountLabel}" FontSize="11" Foreground="{DynamicResource WinTextTertiaryBrush}"/>
+                  </Grid>
+                  <TextBox Text="{Binding SoulEditorText}"
+                           AcceptsReturn="True" TextWrapping="Wrap"
+                           Height="230"
+                           FontFamily="{StaticResource WinMonoFontFamily}" FontSize="12.5"
+                           Watermark="{Binding Loc.SoulContentWatermark}"/>
+                </StackPanel>
+              </StackPanel>
+
+              <!-- Skills, Toolsets & MCP Panel (Lightweight Toggles) -->
+              <StackPanel Spacing="14" IsVisible="{Binding IsSoulCapabilitiesSubTab}">
+                <Border IsVisible="{Binding HasNoEditingCapabilities}" Padding="14" CornerRadius="4" Background="{DynamicResource WinCardSecondaryBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="1">
+                  <TextBlock Text="{Binding Loc.NoCapabilitiesNotice}" FontSize="12.5" Foreground="{DynamicResource WinTextSecondaryBrush}" TextWrapping="Wrap"/>
+                </Border>
+
+                <!-- Toolsets -->
+                <StackPanel Spacing="6" IsVisible="{Binding HasEditingToolsets}">
+                  <TextBlock Text="{Binding Loc.ToolsetsSectionHeader}" FontSize="11" FontWeight="SemiBold" LetterSpacing="0.7" Foreground="{DynamicResource WinAccentTextBrush}"/>
+                  <ItemsControl ItemsSource="{Binding EditingToolsets}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:CapabilityOptionViewModel">
+                        <Border Padding="10,7" Margin="0,0,0,4" CornerRadius="4" Background="{DynamicResource WinCardSecondaryBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="1">
+                          <Grid ColumnDefinitions="Auto,*,Auto">
+                            <CheckBox Grid.Column="0" IsChecked="{Binding IsEnabled}" Margin="0,0,10,0"/>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                              <TextBlock Text="{Binding DisplayTitle}" FontSize="13" FontWeight="SemiBold"/>
+                              <TextBlock Text="{Binding Description}" IsVisible="{Binding HasDescription}" FontSize="11" Foreground="{DynamicResource WinTextSecondaryBrush}" TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <TextBlock Grid.Column="2" Text="{Binding MetaLabel}" IsVisible="{Binding HasMeta}" FontSize="11" Foreground="{DynamicResource WinAccentTextBrush}" VerticalAlignment="Center"/>
+                          </Grid>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+
+                <!-- Skills -->
+                <StackPanel Spacing="6" IsVisible="{Binding HasEditingSkills}">
+                  <TextBlock Text="{Binding Loc.SkillsSectionHeader}" FontSize="11" FontWeight="SemiBold" LetterSpacing="0.7" Foreground="{DynamicResource WinAccentTextBrush}"/>
+                  <ItemsControl ItemsSource="{Binding EditingSkills}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:CapabilityOptionViewModel">
+                        <Border Padding="10,7" Margin="0,0,0,4" CornerRadius="4" Background="{DynamicResource WinCardSecondaryBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="1">
+                          <Grid ColumnDefinitions="Auto,*">
+                            <CheckBox Grid.Column="0" IsChecked="{Binding IsEnabled}" Margin="0,0,10,0"/>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                              <TextBlock Text="{Binding DisplayTitle}" FontSize="13" FontWeight="SemiBold"/>
+                              <TextBlock Text="{Binding Description}" IsVisible="{Binding HasDescription}" FontSize="11" Foreground="{DynamicResource WinTextSecondaryBrush}" TextWrapping="Wrap"/>
+                            </StackPanel>
+                          </Grid>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+
+                <!-- MCP Servers -->
+                <StackPanel Spacing="6" IsVisible="{Binding HasEditingMcpServers}">
+                  <TextBlock Text="{Binding Loc.McpSectionHeader}" FontSize="11" FontWeight="SemiBold" LetterSpacing="0.7" Foreground="{DynamicResource WinAccentTextBrush}"/>
+                  <ItemsControl ItemsSource="{Binding EditingMcpServers}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:CapabilityOptionViewModel">
+                        <Border Padding="10,7" Margin="0,0,0,4" CornerRadius="4" Background="{DynamicResource WinCardSecondaryBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="1">
+                          <Grid ColumnDefinitions="Auto,*">
+                            <CheckBox Grid.Column="0" IsChecked="{Binding IsEnabled}" Margin="0,0,10,0"/>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                              <TextBlock Text="{Binding DisplayTitle}" FontSize="13" FontWeight="SemiBold"/>
+                              <TextBlock Text="{Binding Description}" IsVisible="{Binding HasDescription}" FontSize="11" Foreground="{DynamicResource WinTextSecondaryBrush}" TextWrapping="Wrap"/>
+                            </StackPanel>
+                          </Grid>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </StackPanel>
+
+              <Border IsVisible="{Binding SoulEditorError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                      Background="{DynamicResource WinErrorBannerFillBrush}" BorderBrush="{DynamicResource WinErrorBannerStrokeBrush}" BorderThickness="1" CornerRadius="4" Padding="10,8">
+                <TextBlock Text="{Binding SoulEditorError}" Foreground="{DynamicResource WinErrorBannerTextBrush}" TextWrapping="Wrap" FontSize="12"/>
+              </Border>
+
+              <Border IsVisible="{Binding SoulEditorNotice, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                      Background="{DynamicResource WinInfoBannerFillBrush}" BorderBrush="{DynamicResource WinInfoBannerStrokeBrush}" BorderThickness="1" CornerRadius="4" Padding="10,8">
+                <TextBlock Text="{Binding SoulEditorNotice}" Foreground="{DynamicResource WinInfoBannerTextBrush}" TextWrapping="Wrap" FontSize="12"/>
+              </Border>
+            </StackPanel>
+          </ScrollViewer>
+
+          <!-- Footer -->
+          <Border Grid.Row="2" Padding="20,12" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="0,1,0,0" Background="{DynamicResource WinDialogFooterBrush}">
+            <Grid ColumnDefinitions="*,Auto,Auto">
+              <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"
+                          IsVisible="{Binding CanDeleteEditingProfile}">
+                <Button Classes="subtle" Content="{Binding Loc.DeleteProfile}" Foreground="{DynamicResource WinErrorBannerTextBrush}"
+                        IsVisible="{Binding !IsConfirmingDeleteProfile}"
+                        Command="{Binding RequestDeleteProfileCommand}"
+                        IsEnabled="{Binding !IsSoulEditorBusy}"/>
+                <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding IsConfirmingDeleteProfile}" VerticalAlignment="Center">
+                  <TextBlock Text="{Binding Loc.ConfirmDeleteQuestion}" FontSize="12" Foreground="{DynamicResource WinErrorBannerTextBrush}" VerticalAlignment="Center"/>
+                  <Button Classes="accent" Content="{Binding Loc.YesDelete}" Background="#D94E3E" Foreground="#FFFFFF"
+                          Command="{Binding ConfirmDeleteProfileCommand}" IsEnabled="{Binding !IsSoulEditorBusy}"/>
+                  <Button Classes="subtle" Content="{Binding Loc.Keep}" Command="{Binding CancelDeleteProfileCommand}"/>
+                </StackPanel>
+              </StackPanel>
+              <Button Grid.Column="1" Classes="subtle" Content="{Binding Loc.Close}" Command="{Binding CloseSoulEditorCommand}" Margin="0,0,8,0"/>
+              <Button Grid.Column="2" Classes="accent" Content="{Binding SoulEditorPrimaryActionLabel}"
+                      Command="{Binding SaveOrCreateSoulCommand}" IsEnabled="{Binding !IsSoulEditorBusy}" Padding="18,6"/>
+            </Grid>
+          </Border>
+        </Grid>
+      </Border>
+    </Border>
+
+    <!-- Scheduled Job (Cron) Create / Edit Modal -->
+    <Border Grid.RowSpan="3" IsVisible="{Binding IsCronEditorOpen}" Background="{DynamicResource WinSmokeScrimBrush}">
+      <Border Classes="dialog" Width="680" Height="560" ClipToBounds="True"
+              HorizontalAlignment="Center" VerticalAlignment="Center">
+        <Grid RowDefinitions="Auto,*,Auto" Height="560">
+          <Border Grid.Row="0" Padding="20,14" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="0,0,0,1" Background="{DynamicResource WinDialogFooterBrush}">
+            <Grid ColumnDefinitions="*,Auto">
+              <StackPanel Grid.Column="0" Spacing="2">
+                <TextBlock Text="{Binding CronEditorHeaderTitle}" FontSize="17" FontWeight="SemiBold" Foreground="{DynamicResource WinTextPrimaryBrush}"/>
+                <TextBlock Text="{Binding Loc.CronJobSubtitle}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+              </StackPanel>
+              <Button Grid.Column="1" Classes="subtle" Content="✕" Command="{Binding CloseCronEditorCommand}"/>
+            </Grid>
+          </Border>
+
+          <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="12" Margin="20,16">
+              <StackPanel Spacing="4">
+                <TextBlock Text="{Binding Loc.JobNameLabel}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                <TextBox Text="{Binding CronEditorName}" Watermark="{Binding Loc.JobNameWatermark}"/>
+              </StackPanel>
+
+              <StackPanel Spacing="6">
+                <TextBlock Text="{Binding Loc.ScheduleLabel}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                <TextBox Text="{Binding CronEditorSchedule}" FontFamily="{StaticResource WinMonoFontFamily}" Watermark="{Binding Loc.ScheduleWatermark}"/>
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <Button Classes="subtle" Content="0 9 * * *" FontSize="11" Padding="8,4"
+                          Command="{Binding ApplyCronSchedulePresetCommand}" CommandParameter="0 9 * * *"/>
+                  <Button Classes="subtle" Content="every 2h" FontSize="11" Padding="8,4"
+                          Command="{Binding ApplyCronSchedulePresetCommand}" CommandParameter="every 2h"/>
+                  <Button Classes="subtle" Content="weekdays at 9am" FontSize="11" Padding="8,4"
+                          Command="{Binding ApplyCronSchedulePresetCommand}" CommandParameter="weekdays at 9am"/>
+                  <Button Classes="subtle" Content="0 20 * * 0" FontSize="11" Padding="8,4"
+                          Command="{Binding ApplyCronSchedulePresetCommand}" CommandParameter="0 20 * * 0"/>
+                </StackPanel>
+              </StackPanel>
+
+              <StackPanel Spacing="4">
+                <TextBlock Text="{Binding Loc.PromptLabel}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                <TextBox Text="{Binding CronEditorPrompt}" AcceptsReturn="True" TextWrapping="Wrap" Height="150"
+                         Watermark="{Binding Loc.PromptWatermark}"/>
+              </StackPanel>
+
+              <StackPanel Spacing="4">
+                <TextBlock Text="{Binding Loc.DeliverTargetLabel}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                <TextBox Text="{Binding CronEditorDeliver}" Watermark="local"/>
+                <TextBlock Text="{Binding Loc.DeliverTargetHint}" FontSize="11" Foreground="{DynamicResource WinTextTertiaryBrush}"/>
+              </StackPanel>
+
+              <Border IsVisible="{Binding CronEditorError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                      Background="{DynamicResource WinErrorBannerFillBrush}" BorderBrush="{DynamicResource WinErrorBannerStrokeBrush}" BorderThickness="1" CornerRadius="4" Padding="10,8">
+                <TextBlock Text="{Binding CronEditorError}" Foreground="{DynamicResource WinErrorBannerTextBrush}" TextWrapping="Wrap" FontSize="12"/>
+              </Border>
+            </StackPanel>
+          </ScrollViewer>
+
+          <Border Grid.Row="2" Padding="20,12" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="0,1,0,0" Background="{DynamicResource WinDialogFooterBrush}">
+            <Grid ColumnDefinitions="*,Auto,Auto">
+              <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"
+                          IsVisible="{Binding !IsCreatingCronJob}">
+                <Button Classes="subtle" Content="{Binding Loc.DeleteJob}" Foreground="{DynamicResource WinErrorBannerTextBrush}"
+                        IsVisible="{Binding !IsConfirmingDeleteCronJob}"
+                        Command="{Binding RequestDeleteCronJobCommand}"
+                        IsEnabled="{Binding !IsCronEditorBusy}"/>
+                <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding IsConfirmingDeleteCronJob}" VerticalAlignment="Center">
+                  <TextBlock Text="{Binding Loc.ConfirmDeleteQuestion}" FontSize="12" Foreground="{DynamicResource WinErrorBannerTextBrush}" VerticalAlignment="Center"/>
+                  <Button Classes="accent" Content="{Binding Loc.YesDelete}" Background="#D94E3E" Foreground="#FFFFFF"
+                          Command="{Binding ConfirmDeleteCronJobCommand}" IsEnabled="{Binding !IsCronEditorBusy}"/>
+                  <Button Classes="subtle" Content="{Binding Loc.Keep}" Command="{Binding CancelDeleteCronJobCommand}"/>
+                </StackPanel>
+              </StackPanel>
+              <Button Grid.Column="1" Classes="subtle" Content="{Binding Loc.Close}" Command="{Binding CloseCronEditorCommand}" Margin="0,0,8,0"/>
+              <Button Grid.Column="2" Classes="accent" Content="{Binding CronEditorPrimaryActionLabel}"
+                      Command="{Binding SaveCronJobCommand}" IsEnabled="{Binding !IsCronEditorBusy}" Padding="18,6"/>
+            </Grid>
+          </Border>
+        </Grid>
+      </Border>
+    </Border>
+
+    <!-- Connect / Saved Dashboards Overlay (Fluent 2 Two-Column ContentDialog) -->
+    <Border Grid.RowSpan="3" IsVisible="{Binding ShowConnectOverlay}" Background="{DynamicResource WinSmokeScrimBrush}">
+      <Border Classes="dialog" Width="780" Height="600" ClipToBounds="True"
+              HorizontalAlignment="Center" VerticalAlignment="Center">
+        <Grid RowDefinitions="Auto,*,Auto" Height="600">
+          <!-- Modal Header -->
+          <Border Grid.Row="0" Padding="20,14" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="0,0,0,1" Background="{DynamicResource WinDialogFooterBrush}">
+            <Grid ColumnDefinitions="*,Auto,Auto">
+              <StackPanel Grid.Column="0" Spacing="2">
+                <TextBlock Text="{Binding Loc.ServersConnectionTitle}" FontSize="17" FontWeight="SemiBold" Foreground="{DynamicResource WinTextPrimaryBrush}"/>
+                <TextBlock Text="{Binding Loc.ServersConnectionSubtitle}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+              </StackPanel>
+              <Border Grid.Column="1" CornerRadius="4" Background="{DynamicResource WinCardSecondaryBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="1" Padding="2" Margin="0,0,8,0" VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal" Spacing="2">
+                  <Button Classes="ghost" Content="Auto" FontSize="11" Padding="7,4"
+                          Background="{Binding IsSystemLanguage, Converter={x:Static conv:BoolToAccentBrushConverter.Instance}}"
+                          Command="{Binding SelectSystemLanguageCommand}"/>
+                  <Button Classes="ghost" Content="EN" FontSize="11" Padding="7,4"
+                          Background="{Binding IsEnglishLanguage, Converter={x:Static conv:BoolToAccentBrushConverter.Instance}}"
+                          Command="{Binding SelectEnglishLanguageCommand}"/>
+                  <Button Classes="ghost" Content="中文" FontSize="11" Padding="7,4"
+                          Background="{Binding IsChineseLanguage, Converter={x:Static conv:BoolToAccentBrushConverter.Instance}}"
+                          Command="{Binding SelectChineseLanguageCommand}"/>
+                </StackPanel>
+              </Border>
+              <Button Grid.Column="2" Classes="subtle" Content="✕" IsVisible="{Binding IsConnected}"
+                      Command="{Binding CloseConnectPanelCommand}" VerticalAlignment="Center"/>
+            </Grid>
+          </Border>
+
+          <!-- Two-Column Body -->
+          <Grid Grid.Row="1" ColumnDefinitions="250,*" ClipToBounds="True">
+            <!-- Left Column: Saved Servers -->
+            <Border Grid.Column="0" Background="{DynamicResource WinDialogFooterBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="0,0,1,0" Padding="14">
+              <Grid RowDefinitions="Auto,*">
+                <TextBlock Grid.Row="0" Text="{Binding Loc.SavedServersHeader}" FontSize="11" FontWeight="SemiBold" LetterSpacing="0.8"
+                           Foreground="{DynamicResource WinTextSecondaryBrush}" Margin="2,0,0,10"/>
+
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                  <StackPanel Spacing="8">
+                    <Border IsVisible="{Binding HasNoSavedDashboards}" Padding="14" CornerRadius="4"
+                            Background="{DynamicResource WinCardFillBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="1">
+                      <TextBlock Text="{Binding Loc.NoSavedServers}"
+                                 FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}" TextWrapping="Wrap"/>
+                    </Border>
+
+                    <ItemsControl ItemsSource="{Binding SavedDashboards}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="models:SavedDashboard">
+                          <Border Margin="0,0,0,8" Padding="12,10" CornerRadius="4"
+                                  Background="{DynamicResource WinCardFillBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="1">
+                            <StackPanel Spacing="8">
+                              <Grid ColumnDefinitions="*,Auto">
+                                <StackPanel Grid.Column="0" Spacing="2">
+                                  <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="13.5" Foreground="{DynamicResource WinTextPrimaryBrush}" TextTrimming="CharacterEllipsis"/>
+                                  <TextBlock Text="{Binding NormalizedUrl}" FontSize="11" Foreground="{DynamicResource WinTextSecondaryBrush}" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                                <Button Grid.Column="1" Classes="ghost" Content="✕" FontSize="11" Padding="5,3"
+                                        ToolTip.Tip="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.RemoveServerTip}"
+                                        Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).RemoveSavedDashboardCommand}"
+                                        CommandParameter="{Binding}"/>
+                              </Grid>
+                              <Grid ColumnDefinitions="*,Auto">
+                                <Button Grid.Column="0" Classes="accent" Content="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.Connect}" FontSize="12" Padding="10,5"
+                                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="0,0,6,0"
+                                        Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ConnectSavedDashboardCommand}"
+                                        CommandParameter="{Binding}"/>
+                                <Button Grid.Column="1" Classes="subtle" Content="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.Edit}" FontSize="12" Padding="10,5"
+                                        Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).EditSavedDashboardCommand}"
+                                        CommandParameter="{Binding}"/>
+                              </Grid>
+                            </StackPanel>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </ScrollViewer>
+              </Grid>
+            </Border>
+
+            <!-- Right Column: Clear 2-Step Connection Form + Fluent Expander Extras -->
+            <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
+              <StackPanel Spacing="12" Margin="20,16,24,20">
+                <Border IsVisible="{Binding IsEditingSavedDashboard}"
+                        Background="{DynamicResource WinInfoBannerFillBrush}" BorderBrush="{DynamicResource WinInfoBannerStrokeBrush}"
+                        BorderThickness="1" CornerRadius="4" Padding="10,7">
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0" Text="{Binding EditingServerBanner}" FontSize="12" FontWeight="SemiBold"
+                               Foreground="{DynamicResource WinInfoBannerTextBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                    <Button Grid.Column="1" Classes="subtle" Content="{Binding Loc.NewServerBtn}" FontSize="11.5" Padding="8,3"
+                            Command="{Binding CancelEditSavedDashboardCommand}"/>
+                  </Grid>
+                </Border>
+
+                <!-- Step 1: Server Address -->
+                <Border Padding="12" CornerRadius="4" Background="{DynamicResource WinCardSecondaryBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="1">
+                  <StackPanel Spacing="8">
+                    <TextBlock Text="{Binding Loc.Step1ServerHeader}" FontSize="11" FontWeight="SemiBold" LetterSpacing="0.6" Foreground="{DynamicResource WinAccentTextBrush}"/>
+                    <Grid ColumnDefinitions="170,*">
+                      <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,10,0">
+                        <TextBlock Text="{Binding Loc.Label}" FontSize="11.5" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                        <TextBox Text="{Binding ConnectLabel}" Watermark="{Binding Loc.HomeLabWatermark}"/>
+                      </StackPanel>
+                      <StackPanel Grid.Column="1" Spacing="4">
+                        <TextBlock Text="{Binding Loc.DashboardUrl}" FontSize="11.5" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                        <TextBox Text="{Binding ConnectUrl}" Watermark="http://localhost:9119"/>
+                      </StackPanel>
+                    </Grid>
+                    <TextBlock Text="{Binding Loc.ServerUrlHint}" FontSize="11" Foreground="{DynamicResource WinTextTertiaryBrush}" TextWrapping="Wrap"/>
+                  </StackPanel>
+                </Border>
+
+                <!-- Step 2: Hermes Login (Choose One) -->
+                <Border Padding="12" CornerRadius="4" Background="{DynamicResource WinCardSecondaryBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="1">
+                  <StackPanel Spacing="10">
+                    <TextBlock Text="{Binding Loc.Step2LoginHeader}" FontSize="11" FontWeight="SemiBold" LetterSpacing="0.6" Foreground="{DynamicResource WinAccentTextBrush}"/>
+
+                    <Grid ColumnDefinitions="*,*">
+                      <Button Grid.Column="0" Margin="0,0,4,0" Padding="10,6" CornerRadius="4" BorderThickness="1"
+                              HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                              Content="{Binding Loc.PasswordAuth}" FontSize="12"
+                              Background="{Binding !UseSessionTokenAuth, Converter={x:Static conv:BoolToAccentBrushConverter.Instance}}"
+                              BorderBrush="{Binding !UseSessionTokenAuth, Converter={x:Static conv:BoolToBorderBrushConverter.Instance}}"
+                              Command="{Binding SelectPasswordAuthCommand}"/>
+                      <Button Grid.Column="1" Margin="4,0,0,0" Padding="10,6" CornerRadius="4" BorderThickness="1"
+                              HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                              Content="{Binding Loc.SessionTokenAuth}" FontSize="12"
+                              Background="{Binding UseSessionTokenAuth, Converter={x:Static conv:BoolToAccentBrushConverter.Instance}}"
+                              BorderBrush="{Binding UseSessionTokenAuth, Converter={x:Static conv:BoolToBorderBrushConverter.Instance}}"
+                              Command="{Binding SelectSessionTokenAuthCommand}"/>
+                    </Grid>
+
+                    <TextBlock IsVisible="{Binding !UseSessionTokenAuth}" Text="{Binding Loc.PasswordAuthDesc}" FontSize="11.5" Foreground="{DynamicResource WinTextSecondaryBrush}" TextWrapping="Wrap"/>
+                    <TextBlock IsVisible="{Binding UseSessionTokenAuth}" Text="{Binding Loc.SessionTokenAuthDesc}" FontSize="11.5" Foreground="{DynamicResource WinTextSecondaryBrush}" TextWrapping="Wrap"/>
+
+                    <Grid IsVisible="{Binding !UseSessionTokenAuth}" ColumnDefinitions="*,*">
+                      <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,10,0">
+                        <TextBlock Text="{Binding Loc.Username}" FontSize="11.5" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                        <TextBox Text="{Binding ConnectUsername}" Watermark="{Binding Loc.Username}"/>
+                      </StackPanel>
+                      <StackPanel Grid.Column="1" Spacing="4">
+                        <TextBlock Text="{Binding Loc.Password}" FontSize="11.5" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                        <TextBox Text="{Binding ConnectPassword}" PasswordChar="•" Watermark="{Binding Loc.Password}"/>
+                      </StackPanel>
+                    </Grid>
+
+                    <StackPanel IsVisible="{Binding UseSessionTokenAuth}" Spacing="4">
+                      <TextBlock Text="{Binding Loc.DeploymentTokenLabel}" FontSize="11.5" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                      <TextBox Text="{Binding ConnectSessionToken}" PasswordChar="•" Watermark="HERMES_DASHBOARD_SESSION_TOKEN"/>
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
+
+                <!-- Native Fluent 2 Expander Control for Optional Proxy -->
+                <Expander IsExpanded="{Binding IsAdvancedProxyExpanded}">
+                  <Expander.Header>
+                    <TextBlock Text="{Binding Loc.AdvancedProxyToggleBtn}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                  </Expander.Header>
+                  <StackPanel Spacing="8" Margin="0,4,0,2">
+                    <TextBlock Text="{Binding Loc.CfAccessDesc}" FontSize="11" Foreground="{DynamicResource WinTextSecondaryBrush}" TextWrapping="Wrap"/>
+                    <CheckBox IsChecked="{Binding UseCloudflareAccess}" Content="{Binding Loc.CfAccessLabel}" FontSize="12"/>
+                    <Grid IsVisible="{Binding UseCloudflareAccess}" ColumnDefinitions="*,*">
+                      <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,10,0">
+                        <TextBlock Text="Client ID" FontSize="11.5" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                        <TextBox Text="{Binding CfClientId}" Watermark="CF-Access-Client-Id"/>
+                      </StackPanel>
+                      <StackPanel Grid.Column="1" Spacing="4">
+                        <TextBlock Text="Client Secret" FontSize="11.5" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                        <TextBox Text="{Binding CfClientSecret}" PasswordChar="•" Watermark="CF-Access-Client-Secret"/>
+                      </StackPanel>
+                    </Grid>
+                  </StackPanel>
+                </Expander>
+
+                <Border IsVisible="{Binding ConnectError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                        Background="{DynamicResource WinErrorBannerFillBrush}" BorderBrush="{DynamicResource WinErrorBannerStrokeBrush}" BorderThickness="1" CornerRadius="4" Padding="10,8">
+                  <TextBlock Text="{Binding ConnectError}" Foreground="{DynamicResource WinErrorBannerTextBrush}" TextWrapping="Wrap" FontSize="12"/>
+                </Border>
+              </StackPanel>
+            </ScrollViewer>
+          </Grid>
+
+          <!-- Modal Footer -->
+          <Border Grid.Row="2" Padding="20,12" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="0,1,0,0" Background="{DynamicResource WinDialogFooterBrush}">
+            <Grid ColumnDefinitions="*,Auto,Auto">
+              <TextBlock Grid.Column="0" Text="{Binding Loc.DpapiFooterNotice}"
+                         FontSize="11" Foreground="{DynamicResource WinTextTertiaryBrush}" VerticalAlignment="Center"/>
+              <Button Grid.Column="1" Classes="subtle" Content="{Binding Loc.Cancel}" IsVisible="{Binding IsConnected}"
+                      Command="{Binding CloseConnectPanelCommand}" Margin="0,0,8,0"/>
+              <Button Grid.Column="2" Classes="accent" Content="{Binding ConnectPrimaryActionLabel}" Command="{Binding ConnectNewCommand}"
+                      IsEnabled="{Binding !IsConnecting}" Padding="18,6"/>
+            </Grid>
+          </Border>
+        </Grid>
+      </Border>
+    </Border>
+  </Grid>
+</Window>

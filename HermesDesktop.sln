@@ -1,0 +1,50 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{4A87838C-41E5-4DFE-98BF-62986B02525B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HermesDesktop.Core", "src\HermesDesktop.Core\HermesDesktop.Core.csproj", "{1CEF88FC-4813-4A56-B1D6-926DD6E20B56}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HermesDesktop.Platform", "src\HermesDesktop.Platform\HermesDesktop.Platform.csproj", "{CCC41F55-461C-448A-96A8-9022285F19D4}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HermesDesktop.App", "src\HermesDesktop.App\HermesDesktop.App.csproj", "{7BEBF9A9-3EDA-40F0-8CA5-E44D88252B5B}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{7E9E19DB-1448-42B8-A0F5-7AB9BB093992}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HermesDesktop.Core.Tests", "tests\HermesDesktop.Core.Tests\HermesDesktop.Core.Tests.csproj", "{48D9C391-C4F8-4125-A8F5-77066690C7F1}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{1CEF88FC-4813-4A56-B1D6-926DD6E20B56}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1CEF88FC-4813-4A56-B1D6-926DD6E20B56}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1CEF88FC-4813-4A56-B1D6-926DD6E20B56}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1CEF88FC-4813-4A56-B1D6-926DD6E20B56}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CCC41F55-461C-448A-96A8-9022285F19D4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CCC41F55-461C-448A-96A8-9022285F19D4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CCC41F55-461C-448A-96A8-9022285F19D4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CCC41F55-461C-448A-96A8-9022285F19D4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7BEBF9A9-3EDA-40F0-8CA5-E44D88252B5B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7BEBF9A9-3EDA-40F0-8CA5-E44D88252B5B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7BEBF9A9-3EDA-40F0-8CA5-E44D88252B5B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7BEBF9A9-3EDA-40F0-8CA5-E44D88252B5B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{48D9C391-C4F8-4125-A8F5-77066690C7F1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{48D9C391-C4F8-4125-A8F5-77066690C7F1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{48D9C391-C4F8-4125-A8F5-77066690C7F1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{48D9C391-C4F8-4125-A8F5-77066690C7F1}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{1CEF88FC-4813-4A56-B1D6-926DD6E20B56} = {4A87838C-41E5-4DFE-98BF-62986B02525B}
+		{CCC41F55-461C-448A-96A8-9022285F19D4} = {4A87838C-41E5-4DFE-98BF-62986B02525B}
+		{7BEBF9A9-3EDA-40F0-8CA5-E44D88252B5B} = {4A87838C-41E5-4DFE-98BF-62986B02525B}
+		{48D9C391-C4F8-4125-A8F5-77066690C7F1} = {7E9E19DB-1448-42B8-A0F5-7AB9BB093992}
+	EndGlobalSection
+EndGlobal

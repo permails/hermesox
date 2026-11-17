@@ -1,0 +1,234 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="HermesDesktop.App.App"
+             RequestedThemeVariant="Default">
+  <Application.Resources>
+    <ResourceDictionary>
+      <Color x:Key="SystemAccentColor">#005FB8</Color>
+      <Color x:Key="SystemAccentColorLight1">#60CDFF</Color>
+      <Color x:Key="SystemAccentColorDark1">#003E92</Color>
+      <CornerRadius x:Key="ControlCornerRadius">4</CornerRadius>
+      <CornerRadius x:Key="OverlayCornerRadius">8</CornerRadius>
+      <FontFamily x:Key="WinUiFontFamily">Segoe UI Variable Text, Segoe UI Variable, Microsoft YaHei UI, Segoe UI, fonts:Inter#Inter, PingFang SC, sans-serif</FontFamily>
+      <FontFamily x:Key="WinMonoFontFamily">Cascadia Code, Cascadia Mono, Consolas, Menlo, monospace</FontFamily>
+
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Dark">
+          <!-- Windows 11 WinUI 3 Dark Mode Tokens -->
+          <SolidColorBrush x:Key="WinMicaBackdropBrush" Color="#F2202020"/>
+          <SolidColorBrush x:Key="WinLayerFillBrush" Color="#202020"/>
+          <SolidColorBrush x:Key="WinContentLayerBrush" Color="#272727"/>
+          <SolidColorBrush x:Key="WinCardFillBrush" Color="#2D2D2D"/>
+          <SolidColorBrush x:Key="WinCardSecondaryBrush" Color="#242424"/>
+          <SolidColorBrush x:Key="WinCardStrokeBrush" Color="#12FFFFFF"/>
+          <SolidColorBrush x:Key="WinControlFillBrush" Color="#0FFFFFFF"/>
+          <SolidColorBrush x:Key="WinControlHoverBrush" Color="#16FFFFFF"/>
+          <SolidColorBrush x:Key="WinControlStrokeBrush" Color="#18FFFFFF"/>
+          <SolidColorBrush x:Key="WinSubtleHoverBrush" Color="#0FFFFFFF"/>
+          <SolidColorBrush x:Key="WinTextPrimaryBrush" Color="#FFFFFF"/>
+          <SolidColorBrush x:Key="WinTextSecondaryBrush" Color="#C5C5C5"/>
+          <SolidColorBrush x:Key="WinTextTertiaryBrush" Color="#8E8E8E"/>
+
+          <SolidColorBrush x:Key="WinAccentFillBrush" Color="#60CDFF"/>
+          <SolidColorBrush x:Key="WinAccentHoverBrush" Color="#54BCEB"/>
+          <SolidColorBrush x:Key="WinAccentForegroundBrush" Color="#000000"/>
+          <SolidColorBrush x:Key="WinAccentTextBrush" Color="#99EBFF"/>
+          <SolidColorBrush x:Key="WinAccentSoftBrush" Color="#1F60CDFF"/>
+          <SolidColorBrush x:Key="WinAccentStrokeBrush" Color="#4D60CDFF"/>
+
+          <SolidColorBrush x:Key="WinSmokeScrimBrush" Color="#99000000"/>
+          <SolidColorBrush x:Key="WinDialogSurfaceBrush" Color="#2C2C2C"/>
+          <SolidColorBrush x:Key="WinDialogFooterBrush" Color="#202020"/>
+
+          <SolidColorBrush x:Key="WinUserBubbleFillBrush" Color="#1F60CDFF"/>
+          <SolidColorBrush x:Key="WinUserBubbleStrokeBrush" Color="#4060CDFF"/>
+          <SolidColorBrush x:Key="WinAssistantBubbleFillBrush" Color="#2D2D2D"/>
+          <SolidColorBrush x:Key="WinThoughtCardFillBrush" Color="#242424"/>
+          <SolidColorBrush x:Key="WinToolCardFillBrush" Color="#242424"/>
+          <SolidColorBrush x:Key="WinToolCardStrokeBrush" Color="#14FFFFFF"/>
+          <SolidColorBrush x:Key="WinToolAccentBrush" Color="#60CDFF"/>
+          <SolidColorBrush x:Key="WinClarifyFillBrush" Color="#24332A14"/>
+          <SolidColorBrush x:Key="WinClarifyStrokeBrush" Color="#66FCE100"/>
+          <SolidColorBrush x:Key="WinApprovalFillBrush" Color="#442726"/>
+          <SolidColorBrush x:Key="WinApprovalStrokeBrush" Color="#66FF99A4"/>
+          <SolidColorBrush x:Key="WinErrorBannerFillBrush" Color="#442726"/>
+          <SolidColorBrush x:Key="WinErrorBannerStrokeBrush" Color="#66FF99A4"/>
+          <SolidColorBrush x:Key="WinErrorBannerTextBrush" Color="#FF99A4"/>
+          <SolidColorBrush x:Key="WinInfoBannerFillBrush" Color="#1F60CDFF"/>
+          <SolidColorBrush x:Key="WinInfoBannerStrokeBrush" Color="#4060CDFF"/>
+          <SolidColorBrush x:Key="WinInfoBannerTextBrush" Color="#99EBFF"/>
+          <SolidColorBrush x:Key="WinCodeBackBrush" Color="#1C1C1C"/>
+        </ResourceDictionary>
+
+        <ResourceDictionary x:Key="Light">
+          <!-- Windows 11 WinUI 3 Light Mode Tokens -->
+          <SolidColorBrush x:Key="WinMicaBackdropBrush" Color="#F5F3F3F3"/>
+          <SolidColorBrush x:Key="WinLayerFillBrush" Color="#F3F3F3"/>
+          <SolidColorBrush x:Key="WinContentLayerBrush" Color="#FBFBFB"/>
+          <SolidColorBrush x:Key="WinCardFillBrush" Color="#FFFFFF"/>
+          <SolidColorBrush x:Key="WinCardSecondaryBrush" Color="#F7F7F7"/>
+          <SolidColorBrush x:Key="WinCardStrokeBrush" Color="#0F000000"/>
+          <SolidColorBrush x:Key="WinControlFillBrush" Color="#FFFFFF"/>
+          <SolidColorBrush x:Key="WinControlHoverBrush" Color="#F5F5F5"/>
+          <SolidColorBrush x:Key="WinControlStrokeBrush" Color="#1E000000"/>
+          <SolidColorBrush x:Key="WinSubtleHoverBrush" Color="#0A000000"/>
+          <SolidColorBrush x:Key="WinTextPrimaryBrush" Color="#E4000000"/>
+          <SolidColorBrush x:Key="WinTextSecondaryBrush" Color="#9E000000"/>
+          <SolidColorBrush x:Key="WinTextTertiaryBrush" Color="#72000000"/>
+
+          <SolidColorBrush x:Key="WinAccentFillBrush" Color="#005FB8"/>
+          <SolidColorBrush x:Key="WinAccentHoverBrush" Color="#0052A3"/>
+          <SolidColorBrush x:Key="WinAccentForegroundBrush" Color="#FFFFFF"/>
+          <SolidColorBrush x:Key="WinAccentTextBrush" Color="#003E92"/>
+          <SolidColorBrush x:Key="WinAccentSoftBrush" Color="#14005FB8"/>
+          <SolidColorBrush x:Key="WinAccentStrokeBrush" Color="#33005FB8"/>
+
+          <SolidColorBrush x:Key="WinSmokeScrimBrush" Color="#4D000000"/>
+          <SolidColorBrush x:Key="WinDialogSurfaceBrush" Color="#FFFFFF"/>
+          <SolidColorBrush x:Key="WinDialogFooterBrush" Color="#F3F3F3"/>
+
+          <SolidColorBrush x:Key="WinUserBubbleFillBrush" Color="#EBF3FC"/>
+          <SolidColorBrush x:Key="WinUserBubbleStrokeBrush" Color="#29005FB8"/>
+          <SolidColorBrush x:Key="WinAssistantBubbleFillBrush" Color="#FFFFFF"/>
+          <SolidColorBrush x:Key="WinThoughtCardFillBrush" Color="#F7F7F7"/>
+          <SolidColorBrush x:Key="WinToolCardFillBrush" Color="#F7F7F7"/>
+          <SolidColorBrush x:Key="WinToolCardStrokeBrush" Color="#12000000"/>
+          <SolidColorBrush x:Key="WinToolAccentBrush" Color="#005FB8"/>
+          <SolidColorBrush x:Key="WinClarifyFillBrush" Color="#FFF4CE"/>
+          <SolidColorBrush x:Key="WinClarifyStrokeBrush" Color="#449D5D00"/>
+          <SolidColorBrush x:Key="WinApprovalFillBrush" Color="#FDE7E9"/>
+          <SolidColorBrush x:Key="WinApprovalStrokeBrush" Color="#44C42B1C"/>
+          <SolidColorBrush x:Key="WinErrorBannerFillBrush" Color="#FDE7E9"/>
+          <SolidColorBrush x:Key="WinErrorBannerStrokeBrush" Color="#44C42B1C"/>
+          <SolidColorBrush x:Key="WinErrorBannerTextBrush" Color="#C42B1C"/>
+          <SolidColorBrush x:Key="WinInfoBannerFillBrush" Color="#EBF3FC"/>
+          <SolidColorBrush x:Key="WinInfoBannerStrokeBrush" Color="#33005FB8"/>
+          <SolidColorBrush x:Key="WinInfoBannerTextBrush" Color="#003E92"/>
+          <SolidColorBrush x:Key="WinCodeBackBrush" Color="#F4F4F4"/>
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
+
+  <Application.Styles>
+    <FluentTheme />
+
+    <Style Selector="Window">
+      <Setter Property="FontFamily" Value="{StaticResource WinUiFontFamily}"/>
+      <Setter Property="Foreground" Value="{DynamicResource WinTextPrimaryBrush}"/>
+    </Style>
+
+    <Style Selector="Button.subtle">
+      <Setter Property="Background" Value="{DynamicResource WinControlFillBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource WinControlStrokeBrush}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Foreground" Value="{DynamicResource WinTextPrimaryBrush}"/>
+      <Setter Property="CornerRadius" Value="4"/>
+      <Setter Property="Padding" Value="12,6"/>
+    </Style>
+    <Style Selector="Button.subtle:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource WinControlHoverBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource WinControlStrokeBrush}"/>
+    </Style>
+
+    <Style Selector="Button.ghost">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderBrush" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Foreground" Value="{DynamicResource WinTextSecondaryBrush}"/>
+      <Setter Property="CornerRadius" Value="4"/>
+      <Setter Property="Padding" Value="8,5"/>
+    </Style>
+    <Style Selector="Button.ghost:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource WinSubtleHoverBrush}"/>
+      <Setter Property="Foreground" Value="{DynamicResource WinTextPrimaryBrush}"/>
+    </Style>
+
+    <Style Selector="Button.accent">
+      <Setter Property="Background" Value="{DynamicResource WinAccentFillBrush}"/>
+      <Setter Property="Foreground" Value="{DynamicResource WinAccentForegroundBrush}"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="CornerRadius" Value="4"/>
+      <Setter Property="Padding" Value="14,6"/>
+    </Style>
+    <Style Selector="Button.accent:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource WinAccentHoverBrush}"/>
+      <Setter Property="Foreground" Value="{DynamicResource WinAccentForegroundBrush}"/>
+    </Style>
+
+    <Style Selector="ToggleButton.pill">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderBrush" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Foreground" Value="{DynamicResource WinTextSecondaryBrush}"/>
+      <Setter Property="CornerRadius" Value="4"/>
+      <Setter Property="Padding" Value="10,5"/>
+    </Style>
+    <Style Selector="ToggleButton.pill:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource WinSubtleHoverBrush}"/>
+      <Setter Property="Foreground" Value="{DynamicResource WinTextPrimaryBrush}"/>
+    </Style>
+    <Style Selector="ToggleButton.pill:checked /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource WinSubtleHoverBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource WinCardStrokeBrush}"/>
+      <Setter Property="Foreground" Value="{DynamicResource WinAccentTextBrush}"/>
+    </Style>
+
+    <Style Selector="TextBox">
+      <Setter Property="Background" Value="{DynamicResource WinControlFillBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource WinControlStrokeBrush}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="4"/>
+      <Setter Property="Padding" Value="10,7"/>
+      <Setter Property="Foreground" Value="{DynamicResource WinTextPrimaryBrush}"/>
+      <Setter Property="SelectionBrush" Value="{DynamicResource WinAccentSoftBrush}"/>
+    </Style>
+    <Style Selector="TextBox:focus /template/ Border#PART_BorderElement">
+      <Setter Property="BorderBrush" Value="{DynamicResource WinAccentFillBrush}"/>
+      <Setter Property="BorderThickness" Value="1,1,1,2"/>
+    </Style>
+
+    <Style Selector="ComboBox">
+      <Setter Property="CornerRadius" Value="4"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource WinControlStrokeBrush}"/>
+      <Setter Property="Background" Value="{DynamicResource WinControlFillBrush}"/>
+    </Style>
+
+    <Style Selector="Expander">
+      <Setter Property="CornerRadius" Value="4"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource WinCardStrokeBrush}"/>
+      <Setter Property="Background" Value="{DynamicResource WinCardFillBrush}"/>
+      <Setter Property="HorizontalAlignment" Value="Stretch"/>
+    </Style>
+
+    <Style Selector="ListBox.sessions ListBoxItem">
+      <Setter Property="Padding" Value="10,8"/>
+      <Setter Property="Margin" Value="0,1"/>
+      <Setter Property="CornerRadius" Value="4"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="0"/>
+    </Style>
+    <Style Selector="ListBox.sessions ListBoxItem:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource WinSubtleHoverBrush}"/>
+    </Style>
+    <Style Selector="ListBox.sessions ListBoxItem:selected /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource WinSubtleHoverBrush}"/>
+    </Style>
+
+    <Style Selector="Border.card">
+      <Setter Property="Background" Value="{DynamicResource WinCardFillBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource WinCardStrokeBrush}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="4"/>
+    </Style>
+
+    <Style Selector="Border.dialog">
+      <Setter Property="Background" Value="{DynamicResource WinDialogSurfaceBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource WinCardStrokeBrush}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="8"/>
+      <Setter Property="BoxShadow" Value="0 16 40 0 #38000000"/>
+    </Style>
+  </Application.Styles>
+</Application>
