@@ -1,0 +1,254 @@
+name: Windows Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'App version (e.g. 1.0.0)'
+        required: false
+        default: '1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-app:
+    name: Build & Publish Windows x64
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      app_artifact_id: ${{ steps.upload_app.outputs.artifact-id }}
+      installer_artifact_id: ${{ steps.upload_unsigned_installer.outputs.artifact-id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine Version
+        id: meta
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $ver = "${{ github.ref_name }}".TrimStart('v')
+          } elseif ("${{ inputs.version }}" -ne "") {
+            $ver = "${{ inputs.version }}".TrimStart('v')
+          } else {
+            $ver = "1.0.0"
+          }
+          if ($ver -notmatch '^\d+\.\d+\.\d+$') {
+            throw "Version must be in X.Y.Z format, got: $ver"
+          }
+          "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore & Test
+        run: |
+          dotnet restore HermesDesktop.sln
+          dotnet test HermesDesktop.sln -c Release --no-restore
+
+      - name: Publish win-x64 Self-Contained Multi-File
+        run: |
+          dotnet publish src/HermesDesktop.App/HermesDesktop.App.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=false `
+            -p:DebugType=none `
+            -p:DebugSymbols=false `
+            -p:Version=${{ steps.meta.outputs.version }} `
+            -o dist/win-x64-stage
+
+      - name: Upload Unsigned App Stage (for SignPath)
+        id: upload_app
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-app
+          path: dist/win-x64-stage
+          if-no-files-found: error
+
+      - name: Ensure NSIS (makensis)
+        if: ${{ vars.ENABLE_SIGNPATH != 'true' }}
+        shell: pwsh
+        run: |
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+            choco install nsis -y --no-progress
+            "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          }
+
+      - name: Build Unsigned Installer (when SignPath disabled)
+        if: ${{ vars.ENABLE_SIGNPATH != 'true' }}
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.meta.outputs.version }}"
+          makensis `
+            /DAPP_VERSION=$ver `
+            /DSTAGE_DIR="$PWD\dist\win-x64-stage" `
+            /DICON_PATH="$PWD\src\HermesDesktop.App\Assets\hermes-desktop.ico" `
+            /DOUT_FILE="$PWD\dist\HermesDesktop-Setup-$ver-win-x64.exe" `
+            installer\windows\hermes-desktop.nsi
+          Get-FileHash "$PWD\dist\HermesDesktop-Setup-$ver-win-x64.exe" -Algorithm SHA256 |
+            Format-List | Out-String
+
+      - name: Upload Unsigned Installer Artifact
+        id: upload_unsigned_installer
+        if: ${{ vars.ENABLE_SIGNPATH != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/HermesDesktop-Setup-${{ steps.meta.outputs.version }}-win-x64.exe
+          if-no-files-found: error
+
+  sign-app:
+    name: Sign App Binaries via SignPath
+    needs: build-app
+    if: ${{ vars.ENABLE_SIGNPATH == 'true' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Submit App Signing Request
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'hermesox' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: 'app-binaries'
+          github-artifact-id: ${{ needs.build-app.outputs.app_artifact_id }}
+          wait-for-completion: true
+          output-artifact-directory: './signed-app'
+
+      - name: Upload Signed App Stage
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-app
+          path: ./signed-app
+          if-no-files-found: error
+
+  package-signed-installer:
+    name: Package Installer with Signed App Binaries
+    needs: [build-app, sign-app]
+    if: ${{ vars.ENABLE_SIGNPATH == 'true' }}
+    runs-on: windows-latest
+    outputs:
+      installer_artifact_id: ${{ steps.upload_signed_stage_installer.outputs.artifact-id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Base App Stage
+        uses: actions/download-artifact@v4
+        with:
+          name: unsigned-app
+          path: dist/win-x64-stage
+
+      - name: Overlay Signed App Binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: signed-app
+          path: signed-app
+
+      - name: Merge Signed Binaries into Stage
+        shell: pwsh
+        run: Copy-Item -Path "signed-app\*" -Destination "dist\win-x64-stage\" -Recurse -Force
+
+      - name: Ensure NSIS (makensis)
+        shell: pwsh
+        run: |
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+            choco install nsis -y --no-progress
+            "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          }
+
+      - name: Build Installer
+        shell: pwsh
+        run: |
+          $ver = "${{ needs.build-app.outputs.version }}"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          makensis `
+            /DAPP_VERSION=$ver `
+            /DSTAGE_DIR="$PWD\dist\win-x64-stage" `
+            /DICON_PATH="$PWD\src\HermesDesktop.App\Assets\hermes-desktop.ico" `
+            /DOUT_FILE="$PWD\dist\HermesDesktop-Setup-$ver-win-x64.exe" `
+            installer\windows\hermes-desktop.nsi
+
+      - name: Upload Unsigned Installer (containing signed app binaries)
+        id: upload_signed_stage_installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-installer
+          path: dist/HermesDesktop-Setup-${{ needs.build-app.outputs.version }}-win-x64.exe
+          if-no-files-found: error
+
+  sign-installer:
+    name: Sign Installer via SignPath
+    needs: [build-app, package-signed-installer]
+    if: ${{ vars.ENABLE_SIGNPATH == 'true' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Submit Installer Signing Request
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'hermesox' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: 'windows-installer'
+          github-artifact-id: ${{ needs.package-signed-installer.outputs.installer_artifact_id }}
+          wait-for-completion: true
+          output-artifact-directory: './signed-installer'
+
+      - name: Verify Signed Installer Exists
+        shell: bash
+        run: ls -lh ./signed-installer
+
+      - name: Upload Final Signed Installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: ./signed-installer/**
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-app]
+    if: ${{ always() && startsWith(github.ref, 'refs/tags/v') && needs.build-app.result == 'success' && (vars.ENABLE_SIGNPATH != 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Unsigned Installer Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-installer
+          path: ./release-assets
+
+      - name: Create Release (Unsigned Preview)
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./release-assets/*
+          generate_release_notes: true
+
+  publish-signed-release:
+    name: Publish Signed GitHub Release
+    needs: [build-app, sign-installer]
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && vars.ENABLE_SIGNPATH == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Signed Installer Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-installer
+          path: ./release-assets
+
+      - name: Create Release (Signed)
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./release-assets/*
+          generate_release_notes: true

@@ -35,6 +35,7 @@ VIAddVersionKey "CompanyName" "${APP_PUBLISHER}"
 VIAddVersionKey "FileDescription" "${APP_NAME} Setup"
 VIAddVersionKey "FileVersion" "${APP_VERSION}.0"
 VIAddVersionKey "ProductVersion" "${APP_VERSION}"
+VIAddVersionKey "LegalCopyright" "Copyright (c) 2026 permails (MIT License)"
 VIAddVersionKey "OriginalFilename" "HermesDesktop-Setup-${APP_VERSION}-win-x64.exe"
 
 !include "MUI2.nsh"

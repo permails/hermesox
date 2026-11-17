@@ -27,6 +27,11 @@ To build the Windows x64 installer (requires `makensis`):
 ./scripts/build-win-installer.sh
 ```
 
+## Code Signing & Privacy
+
+- Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/). Release binaries and Windows installers are built from source via GitHub Actions.
+- **Privacy Policy**: This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. All connections go directly to the self-hosted Hermes gateway URL configured by the user.
+
 ## License
 
 Released under the [MIT License](LICENSE).  
