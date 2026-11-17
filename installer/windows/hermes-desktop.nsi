@@ -6,6 +6,9 @@ Unicode True
 !ifndef STAGE_DIR
   !define STAGE_DIR "..\..\dist\win-x64-stage"
 !endif
+!ifndef STAGE_PATTERN
+  !define STAGE_PATTERN "${STAGE_DIR}/*"
+!endif
 !ifndef ICON_PATH
   !define ICON_PATH "..\..\src\HermesDesktop.App\Assets\hermes-desktop.ico"
 !endif
@@ -135,7 +138,7 @@ Section "$(SecCoreName)" SecCore
   SetOutPath "$INSTDIR"
   SetOverwrite on
 
-  File /r "${STAGE_DIR}/*"
+  File /r "${STAGE_PATTERN}"
 
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 

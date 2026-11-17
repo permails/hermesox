@@ -91,14 +91,12 @@ jobs:
         shell: pwsh
         run: |
           $ver = "${{ steps.meta.outputs.version }}"
-          makensis `
-            /DAPP_VERSION=$ver `
-            /DSTAGE_DIR="$PWD\dist\win-x64-stage" `
-            /DICON_PATH="$PWD\src\HermesDesktop.App\Assets\hermes-desktop.ico" `
-            /DOUT_FILE="$PWD\dist\HermesDesktop-Setup-$ver-win-x64.exe" `
-            installer\windows\hermes-desktop.nsi
-          Get-FileHash "$PWD\dist\HermesDesktop-Setup-$ver-win-x64.exe" -Algorithm SHA256 |
-            Format-List | Out-String
+          $stagePattern = Join-Path $PWD "dist\win-x64-stage\*"
+          $iconPath = Join-Path $PWD "src\HermesDesktop.App\Assets\hermes-desktop.ico"
+          $outFile = Join-Path $PWD "dist\HermesDesktop-Setup-$ver-win-x64.exe"
+          & makensis /INPUTCHARSET UTF8 "/DAPP_VERSION=$ver" "/DSTAGE_PATTERN=$stagePattern" "/DICON_PATH=$iconPath" "/DOUT_FILE=$outFile" "installer\windows\hermes-desktop.nsi"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-FileHash $outFile -Algorithm SHA256 | Format-List | Out-String
 
       - name: Upload Unsigned Installer Artifact
         id: upload_unsigned_installer
@@ -176,12 +174,11 @@ jobs:
         run: |
           $ver = "${{ needs.build-app.outputs.version }}"
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          makensis `
-            /DAPP_VERSION=$ver `
-            /DSTAGE_DIR="$PWD\dist\win-x64-stage" `
-            /DICON_PATH="$PWD\src\HermesDesktop.App\Assets\hermes-desktop.ico" `
-            /DOUT_FILE="$PWD\dist\HermesDesktop-Setup-$ver-win-x64.exe" `
-            installer\windows\hermes-desktop.nsi
+          $stagePattern = Join-Path $PWD "dist\win-x64-stage\*"
+          $iconPath = Join-Path $PWD "src\HermesDesktop.App\Assets\hermes-desktop.ico"
+          $outFile = Join-Path $PWD "dist\HermesDesktop-Setup-$ver-win-x64.exe"
+          & makensis /INPUTCHARSET UTF8 "/DAPP_VERSION=$ver" "/DSTAGE_PATTERN=$stagePattern" "/DICON_PATH=$iconPath" "/DOUT_FILE=$outFile" "installer\windows\hermes-desktop.nsi"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload Unsigned Installer (containing signed app binaries)
         id: upload_signed_stage_installer
