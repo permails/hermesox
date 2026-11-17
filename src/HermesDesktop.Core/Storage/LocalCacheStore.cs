@@ -24,7 +24,11 @@ public sealed class LocalCacheStore
         var resolvedDb = dbPath ?? AppDataPaths.CacheDatabasePath;
         _settingsPath = settingsPath ?? AppDataPaths.SettingsFilePath;
         Directory.CreateDirectory(Path.GetDirectoryName(resolvedDb)!);
-        _connectionString = $"Data Source={resolvedDb}";
+        _connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = resolvedDb,
+            Pooling = false
+        }.ToString();
         InitializeSchema();
     }
 

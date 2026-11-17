@@ -2,6 +2,7 @@ using System.Globalization;
 using HermesDesktop.Core.Localization;
 using HermesDesktop.Core.Models;
 using HermesDesktop.Core.Storage;
+using Microsoft.Data.Sqlite;
 using Xunit;
 
 namespace HermesDesktop.Core.Tests;
@@ -68,7 +69,11 @@ public class AppLocalizationTests
         }
         finally
         {
-            Directory.Delete(tempDir, recursive: true);
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, recursive: true);
+            }
         }
     }
 }

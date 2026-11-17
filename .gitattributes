@@ -1,0 +1,9 @@
+* text=auto
+*.cs text eol=lf
+*.csproj text eol=lf
+*.axaml text eol=lf
+*.sln text eol=crlf
+*.nsi text eol=lf
+*.sh text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
