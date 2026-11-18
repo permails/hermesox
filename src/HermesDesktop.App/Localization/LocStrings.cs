@@ -53,6 +53,7 @@ public sealed class LocStrings : INotifyPropertyChanged
     public string OpenInBesideChatTip => L("Open in Beside Chat", "在右侧并行窗口打开");
     public string DeleteSessionTip => L("Delete session", "删除会话");
     public string DeleteSession => L("Delete Session", "删除会话");
+    public string Deleting => L("Deleting...", "正在删除...");
     public string ConfirmDeleteSessionPrefix => L("Delete conversation ", "确认删除会话「");
     public string ConfirmDeleteSessionSuffix => L("?", "」？");
     public string StopBeforeDeleteSession => L(

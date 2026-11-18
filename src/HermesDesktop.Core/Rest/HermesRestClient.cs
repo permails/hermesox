@@ -356,7 +356,20 @@ public sealed class HermesRestClient : IDisposable
     public Task DeleteSessionAsync(string sessionId, string? profile = null, CancellationToken ct = default) =>
         SendSessionMutationAsync(HttpMethod.Delete, sessionId, bodyFields: null, profile, ct);
 
+    public Task ArchiveSessionAsync(string sessionId, bool archived = true, string? profile = null, CancellationToken ct = default) =>
+        SendSessionMutationAsync(
+            HttpMethod.Patch,
+            sessionId,
+            new Dictionary<string, object?> { ["archived"] = archived },
+            profile,
+            ct);
+
     private sealed record SessionMutationSnapshot(long Revision, long? Generation);
+
+    private static string? NormalizeNonDefaultProfile(string? profile) =>
+        string.IsNullOrWhiteSpace(profile) || profile.Equals("default", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : profile.Trim();
 
     private async Task SendSessionMutationAsync(
         HttpMethod method,
@@ -366,14 +379,15 @@ public sealed class HermesRestClient : IDisposable
         CancellationToken ct)
     {
         var encodedId = Uri.EscapeDataString(sessionId);
+        var scopedProfile = NormalizeNonDefaultProfile(profile);
         var basePath = $"/api/sessions/{encodedId}";
-        if (!string.IsNullOrWhiteSpace(profile))
-            basePath += $"?profile={Uri.EscapeDataString(profile)}";
+        if (scopedProfile is not null)
+            basePath += $"?profile={Uri.EscapeDataString(scopedProfile)}";
 
         for (var attempt = 0; attempt < 2; attempt++)
         {
             var snapshot = _supportsMutationSnapshot
-                ? await TryGetSessionMutationSnapshotAsync(encodedId, profile, ct)
+                ? await TryGetSessionMutationSnapshotAsync(encodedId, scopedProfile, ct)
                 : null;
 
             var requestPath = basePath;
@@ -396,8 +410,8 @@ public sealed class HermesRestClient : IDisposable
                 {
                     foreach (var kv in bodyFields) payload[kv.Key] = kv.Value;
                 }
-                if (!string.IsNullOrWhiteSpace(profile))
-                    payload["profile"] = profile;
+                if (scopedProfile is not null)
+                    payload["profile"] = scopedProfile;
                 if (snapshot is not null)
                 {
                     payload["request_id"] = Guid.NewGuid().ToString("D");

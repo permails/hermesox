@@ -162,9 +162,12 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty] private SessionSummary? _activeSession;
     [ObservableProperty] private SessionSummary? _pendingDeleteSession;
     [ObservableProperty] private bool _isDeletingSession;
+    [ObservableProperty] private string? _deleteSessionError;
     [ObservableProperty] private bool _isLoadingMessages;
 
     public bool IsConfirmingDeleteSession => PendingDeleteSession is not null;
+    public bool HasDeleteSessionError => !string.IsNullOrWhiteSpace(DeleteSessionError);
+    public string DeleteSessionActionLabel => IsDeletingSession ? Loc.Deleting : Loc.YesDelete;
     public string PendingDeleteSessionPrompt => PendingDeleteSession is null
         ? ""
         : $"{Loc.ConfirmDeleteSessionPrefix}{PendingDeleteSession.Title}{Loc.ConfirmDeleteSessionSuffix}";
@@ -174,6 +177,9 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(IsConfirmingDeleteSession));
         OnPropertyChanged(nameof(PendingDeleteSessionPrompt));
     }
+
+    partial void OnIsDeletingSessionChanged(bool value) => OnPropertyChanged(nameof(DeleteSessionActionLabel));
+    partial void OnDeleteSessionErrorChanged(string? value) => OnPropertyChanged(nameof(HasDeleteSessionError));
     [ObservableProperty] private bool _isRunningTurn;
     [ObservableProperty] private string _composerText = "";
     [ObservableProperty] private string _currentModelLabel = "default";
@@ -1112,13 +1118,16 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             StatusBanner = Loc.StopBeforeDeleteSession;
             return;
         }
+        DeleteSessionError = null;
         PendingDeleteSession = target;
     }
 
     [RelayCommand]
     private void CancelDeleteSession()
     {
-        if (!IsDeletingSession) PendingDeleteSession = null;
+        if (IsDeletingSession) return;
+        DeleteSessionError = null;
+        PendingDeleteSession = null;
     }
 
     [RelayCommand]
@@ -1129,17 +1138,17 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
         if (IsRunningTurn && ActiveSession is not null && SessionsMatch(target, ActiveSession, _activeRuntimeSessionId))
         {
-            PendingDeleteSession = null;
+            DeleteSessionError = Loc.StopBeforeDeleteSession;
             StatusBanner = Loc.StopBeforeDeleteSession;
             return;
         }
 
+        DeleteSessionError = null;
         IsDeletingSession = true;
         try
         {
-            var deleteKey = target.StoredSessionId ?? target.Id;
             var profile = target.Profile ?? SelectedProfile?.Name;
-            await _restClient.DeleteSessionAsync(deleteKey, profile);
+            await DeleteOrArchiveSessionOnServerAsync(target, profile);
 
             var deletedRuntime = ActiveSession is not null && SessionsMatch(target, ActiveSession, _activeRuntimeSessionId)
                 ? _activeRuntimeSessionId
@@ -1161,6 +1170,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
             var deletedActive = ActiveSession is not null && SessionsMatch(target, ActiveSession, _activeRuntimeSessionId);
             PendingDeleteSession = null;
+            DeleteSessionError = null;
 
             if (deletedActive)
             {
@@ -1190,12 +1200,66 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         }
         catch (Exception ex)
         {
+            DeleteSessionError = ex.Message;
             StatusBanner = $"Delete failed: {ex.Message}";
             AppDiagnostics.Log("SESSION_DEL_ERR", ex.Message);
         }
         finally
         {
             IsDeletingSession = false;
+        }
+    }
+
+    private async Task DeleteOrArchiveSessionOnServerAsync(SessionSummary target, string? profile)
+    {
+        if (_restClient is null) return;
+
+        var candidates = new List<string>();
+        foreach (var raw in new[] { target.StoredSessionId, target.Id, target.RuntimeSessionId }.Concat(target.AlternateIds))
+        {
+            if (!string.IsNullOrWhiteSpace(raw) && !candidates.Contains(raw, StringComparer.Ordinal))
+            {
+                candidates.Add(raw);
+            }
+        }
+
+        HttpRequestException? lastNotFound = null;
+        var methodNotAllowed = false;
+
+        foreach (var candidateId in candidates)
+        {
+            try
+            {
+                await _restClient.DeleteSessionAsync(candidateId, profile);
+                return;
+            }
+            catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                lastNotFound = ex;
+            }
+            catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.MethodNotAllowed)
+            {
+                methodNotAllowed = true;
+                break;
+            }
+        }
+
+        // Older Hermes builds that do not implement DELETE /api/sessions/{id} support archiving it out of the active list.
+        if (methodNotAllowed && candidates.Count > 0)
+        {
+            await _restClient.ArchiveSessionAsync(candidates[0], archived: true, profile);
+            return;
+        }
+
+        // Brand-new 0-message drafts or already-removed sessions may return 404 on the server; remove locally cleanly.
+        if (lastNotFound is not null && target.MessageCount is null or 0)
+        {
+            return;
+        }
+
+        if (lastNotFound is not null)
+        {
+            throw lastNotFound;
         }
     }
 
@@ -2575,6 +2639,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             OnPropertyChanged(nameof(ConnectPrimaryActionLabel));
             OnPropertyChanged(nameof(EditingServerBanner));
             OnPropertyChanged(nameof(PendingDeleteSessionPrompt));
+            OnPropertyChanged(nameof(DeleteSessionActionLabel));
 
             foreach (var t in VisibleTabs) t.RefreshLocalization();
             foreach (var t in AllConfigurableTabs) t.RefreshLocalization();

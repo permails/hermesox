@@ -97,4 +97,26 @@ public class SessionMutationTests
         Assert.Equal("/api/sessions/sess-legacy-2", handler.Requests[2].PathAndQuery);
         Assert.Equal(HttpMethod.Delete, handler.Requests[2].Method);
     }
+
+    [Fact]
+    public async Task DeleteSessionAsync_OmitsDefaultProfileQueryParameter()
+    {
+        var handler = new StubHttpHandler((req, _) =>
+        {
+            if (req.Method == HttpMethod.Get && req.RequestUri!.AbsolutePath.EndsWith("/mutation-snapshot"))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound)
+                {
+                    Content = new StringContent("{\"detail\":\"Not Found\"}", Encoding.UTF8, "application/json")
+                };
+            }
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        });
+
+        using var client = new HermesRestClient("http://localhost:9119", CreateTicket(), messageHandler: handler);
+        await client.DeleteSessionAsync("sess-default-1", "default");
+
+        Assert.DoesNotContain("profile=", handler.Requests[0].PathAndQuery);
+        Assert.Equal("/api/sessions/sess-default-1", handler.Requests[1].PathAndQuery);
+    }
 }
