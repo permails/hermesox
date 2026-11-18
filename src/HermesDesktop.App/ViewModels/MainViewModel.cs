@@ -127,7 +127,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private string _soulOriginalTitle = "";
     private bool _soulSlugEditedManually;
 
-    public event Action? TranscriptScrollRequested;
+    public event Action<bool>? TranscriptScrollRequested;
+    public event Action<bool>? BesideScrollRequested;
     public Func<string, Task<string?>> PreviewHtmlLoader => LoadPreviewHtmlAsync;
     public Func<string, Task<byte[]?>> MediaBytesLoader => LoadMediaBytesAsync;
 
@@ -159,7 +160,20 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     // Sessions & Chat
     [ObservableProperty] private string _sessionSearchQuery = "";
     [ObservableProperty] private SessionSummary? _activeSession;
+    [ObservableProperty] private SessionSummary? _pendingDeleteSession;
+    [ObservableProperty] private bool _isDeletingSession;
     [ObservableProperty] private bool _isLoadingMessages;
+
+    public bool IsConfirmingDeleteSession => PendingDeleteSession is not null;
+    public string PendingDeleteSessionPrompt => PendingDeleteSession is null
+        ? ""
+        : $"{Loc.ConfirmDeleteSessionPrefix}{PendingDeleteSession.Title}{Loc.ConfirmDeleteSessionSuffix}";
+
+    partial void OnPendingDeleteSessionChanged(SessionSummary? value)
+    {
+        OnPropertyChanged(nameof(IsConfirmingDeleteSession));
+        OnPropertyChanged(nameof(PendingDeleteSessionPrompt));
+    }
     [ObservableProperty] private bool _isRunningTurn;
     [ObservableProperty] private string _composerText = "";
     [ObservableProperty] private string _currentModelLabel = "default";
@@ -1068,7 +1082,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 ActiveMessages.Add(new MessageItemViewModel(msg));
             }
             RecomputeTranscriptPresentation(ActiveMessages, IsRunningTurn);
-            TranscriptScrollRequested?.Invoke();
+            TranscriptScrollRequested?.Invoke(true);
         }
         catch (Exception ex)
         {
@@ -1085,6 +1099,103 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             {
                 IsLoadingMessages = false;
             }
+        }
+    }
+
+    [RelayCommand]
+    private void RequestDeleteSession(SessionSummary? session)
+    {
+        var target = session ?? ActiveSession;
+        if (target is null || IsDeletingSession) return;
+        if (IsRunningTurn && ActiveSession is not null && SessionsMatch(target, ActiveSession, _activeRuntimeSessionId))
+        {
+            StatusBanner = Loc.StopBeforeDeleteSession;
+            return;
+        }
+        PendingDeleteSession = target;
+    }
+
+    [RelayCommand]
+    private void CancelDeleteSession()
+    {
+        if (!IsDeletingSession) PendingDeleteSession = null;
+    }
+
+    [RelayCommand]
+    private async Task ConfirmDeleteSessionAsync()
+    {
+        var target = PendingDeleteSession;
+        if (_restClient is null || target is null || IsDeletingSession) return;
+
+        if (IsRunningTurn && ActiveSession is not null && SessionsMatch(target, ActiveSession, _activeRuntimeSessionId))
+        {
+            PendingDeleteSession = null;
+            StatusBanner = Loc.StopBeforeDeleteSession;
+            return;
+        }
+
+        IsDeletingSession = true;
+        try
+        {
+            var deleteKey = target.StoredSessionId ?? target.Id;
+            var profile = target.Profile ?? SelectedProfile?.Name;
+            await _restClient.DeleteSessionAsync(deleteKey, profile);
+
+            var deletedRuntime = ActiveSession is not null && SessionsMatch(target, ActiveSession, _activeRuntimeSessionId)
+                ? _activeRuntimeSessionId
+                : target.RuntimeSessionId;
+
+            _allSessions.RemoveAll(s => SessionsMatch(s, target, deletedRuntime));
+            _cache.SaveDraft(DraftKey(target.Id), "");
+            if (!string.IsNullOrEmpty(target.StoredSessionId))
+            {
+                _cache.SaveDraft(DraftKey(target.StoredSessionId), "");
+            }
+
+            if (BesideSession is not null && SessionsMatch(BesideSession, target, deletedRuntime))
+            {
+                BesideSession = null;
+                BesideMessages.Clear();
+                IsBesideVisible = false;
+            }
+
+            var deletedActive = ActiveSession is not null && SessionsMatch(target, ActiveSession, _activeRuntimeSessionId);
+            PendingDeleteSession = null;
+
+            if (deletedActive)
+            {
+                Interlocked.Increment(ref _openSessionGeneration);
+                _activeRuntimeSessionId = null;
+                _streamBufferSessionId = null;
+                _streamFlushTimer.Stop();
+                _streamContentBuffer.Clear();
+                _streamReasoningBuffer.Clear();
+                if (_streamingAssistantMessage is not null) _streamingAssistantMessage.IsStreaming = false;
+                _streamingAssistantMessage = null;
+                _activeTools.Clear();
+                ActiveMessages.Clear();
+                IsRunningTurn = false;
+                ComposerText = "";
+                ActiveSession = null;
+            }
+
+            ApplySessionFilter();
+
+            if (deletedActive && ActiveSession is null && FilteredSessions.Count > 0)
+            {
+                await SelectAndOpenSessionAsync(FilteredSessions[0]);
+            }
+
+            StatusBanner = $"Connected · {_activeDashboard?.Label}";
+        }
+        catch (Exception ex)
+        {
+            StatusBanner = $"Delete failed: {ex.Message}";
+            AppDiagnostics.Log("SESSION_DEL_ERR", ex.Message);
+        }
+        finally
+        {
+            IsDeletingSession = false;
         }
     }
 
@@ -1151,7 +1262,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             Timestamp = DateTimeOffset.Now.ToString("HH:mm")
         }));
         RecomputeTranscriptPresentation(ActiveMessages, IsRunningTurn);
-        TranscriptScrollRequested?.Invoke();
+        TranscriptScrollRequested?.Invoke(true);
 
         var profile = ActiveSession.Profile ?? SelectedProfile?.Name;
         var targetId = _activeRuntimeSessionId ?? ActiveSession.RuntimeSessionId ?? ActiveSession.Id;
@@ -1212,7 +1323,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             Content = text,
             Timestamp = DateTimeOffset.Now.ToString("HH:mm")
         }));
-        TranscriptScrollRequested?.Invoke();
+        TranscriptScrollRequested?.Invoke(false);
     }
 
     private async Task<string?> EnsureWsReconnectedForActiveSessionAsync(string? profile)
@@ -1275,7 +1386,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 DisplayKind = "steer",
                 Timestamp = DateTimeOffset.Now.ToString("HH:mm")
             }));
-            TranscriptScrollRequested?.Invoke();
+            TranscriptScrollRequested?.Invoke(true);
         }
         catch (Exception ex)
         {
@@ -2463,6 +2574,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             OnPropertyChanged(nameof(CronEditorPrimaryActionLabel));
             OnPropertyChanged(nameof(ConnectPrimaryActionLabel));
             OnPropertyChanged(nameof(EditingServerBanner));
+            OnPropertyChanged(nameof(PendingDeleteSessionPrompt));
 
             foreach (var t in VisibleTabs) t.RefreshLocalization();
             foreach (var t in AllConfigurableTabs) t.RefreshLocalization();
@@ -2562,18 +2674,63 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             var lastLocalCount = ActiveMessages.Count;
             if (messages.Count >= lastLocalCount || !(_streamingAssistantMessage?.IsStreaming ?? false))
             {
-                ActiveMessages.Clear();
-                foreach (var msg in messages)
-                {
-                    ActiveMessages.Add(new MessageItemViewModel(msg));
-                }
+                ReconcileMessagesInPlace(ActiveMessages, messages);
                 RecomputeTranscriptPresentation(ActiveMessages, IsRunningTurn);
-                TranscriptScrollRequested?.Invoke();
+                TranscriptScrollRequested?.Invoke(false);
             }
         }
         catch (Exception ex)
         {
             AppDiagnostics.Log("REST_SYNC_ERR", ex.Message);
+        }
+    }
+
+    private static void ReconcileMessagesInPlace(
+        ObservableCollection<MessageItemViewModel> target,
+        IReadOnlyList<ChatMessage> incoming)
+    {
+        var common = 0;
+        var limit = Math.Min(target.Count, incoming.Count);
+        while (common < limit)
+        {
+            var existing = target[common];
+            var next = incoming[common];
+            if (existing.Role != next.Role || !string.Equals(existing.Id, next.Id, StringComparison.Ordinal))
+            {
+                break;
+            }
+            if (!string.Equals(existing.Content, next.Content, StringComparison.Ordinal))
+            {
+                existing.Content = next.Content;
+            }
+            if (!string.Equals(existing.Reasoning, next.Reasoning, StringComparison.Ordinal))
+            {
+                existing.Reasoning = next.Reasoning;
+            }
+            if (existing.Tool != next.Tool)
+            {
+                existing.Tool = next.Tool;
+            }
+            if (existing.Approval != next.Approval)
+            {
+                existing.Approval = next.Approval;
+            }
+            if (existing.Clarify != next.Clarify)
+            {
+                existing.Clarify = next.Clarify;
+            }
+            existing.IsStreaming = false;
+            common++;
+        }
+
+        while (target.Count > common)
+        {
+            target.RemoveAt(target.Count - 1);
+        }
+
+        for (var i = common; i < incoming.Count; i++)
+        {
+            target.Add(new MessageItemViewModel(incoming[i]));
         }
     }
 
@@ -2696,16 +2853,22 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
         AppDiagnostics.SetPhase("FlushStreamingDeltas", $"contentLen={_streamContentBuffer.Length}, reasonLen={_streamReasoningBuffer.Length}");
         var msg = _streamingAssistantMessage ?? EnsureStreamingAssistant(ActiveMessages);
+        var updated = false;
         if (_streamReasoningBuffer.Length > 0)
         {
             msg.Reasoning = (msg.Reasoning ?? string.Empty) + _streamReasoningBuffer.ToString();
             _streamReasoningBuffer.Clear();
+            updated = true;
         }
         if (_streamContentBuffer.Length > 0)
         {
             msg.Content += _streamContentBuffer.ToString();
             _streamContentBuffer.Clear();
-            TranscriptScrollRequested?.Invoke();
+            updated = true;
+        }
+        if (updated)
+        {
+            TranscriptScrollRequested?.Invoke(false);
         }
         AppDiagnostics.SetPhase("idle");
     }
@@ -2794,7 +2957,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                     _ = RefreshActiveSessionMessagesAsync();
                 }
                 if (trackTools) IsRunningTurn = false;
-                if (target == ActiveMessages) TranscriptScrollRequested?.Invoke();
+                if (target == ActiveMessages) TranscriptScrollRequested?.Invoke(false);
+                else if (target == BesideMessages) BesideScrollRequested?.Invoke(false);
                 break;
 
             case MessageInterruptedEvent:
@@ -2816,7 +2980,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                     Content = $"Error: {err.Message}",
                     Timestamp = DateTimeOffset.Now.ToString("HH:mm")
                 }));
-                if (target == ActiveMessages) TranscriptScrollRequested?.Invoke();
+                if (target == ActiveMessages) TranscriptScrollRequested?.Invoke(false);
+                else if (target == BesideMessages) BesideScrollRequested?.Invoke(false);
                 break;
 
             case ToolStartEvent tStart when trackTools:
@@ -2833,7 +2998,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 });
                 if (!string.IsNullOrEmpty(tStart.ToolId)) _activeTools[tStart.ToolId] = toolMsg;
                 target.Add(toolMsg);
-                TranscriptScrollRequested?.Invoke();
+                TranscriptScrollRequested?.Invoke(false);
                 break;
 
             case ToolCompleteEvent tEnd when trackTools:
@@ -2852,6 +3017,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                         Timestamp = DateTimeOffset.Now.ToString("HH:mm")
                     }));
                 }
+                TranscriptScrollRequested?.Invoke(false);
                 break;
 
             case ApprovalRequestEvent approval:
@@ -2865,7 +3031,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                     Timestamp = DateTimeOffset.Now.ToString("HH:mm")
                 }));
                 _notifications.ShowNeedsAttention(ActiveSession?.Title ?? "Hermes", $"Approve command: {approval.Activity.Command}");
-                if (target == ActiveMessages) TranscriptScrollRequested?.Invoke();
+                if (target == ActiveMessages) TranscriptScrollRequested?.Invoke(false);
                 break;
 
             case ApprovalWithdrawnEvent withdrawn:
@@ -2890,7 +3056,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                     Timestamp = DateTimeOffset.Now.ToString("HH:mm")
                 }));
                 _notifications.ShowNeedsAttention(ActiveSession?.Title ?? "Hermes", clarify.Activity.Question);
-                if (target == ActiveMessages) TranscriptScrollRequested?.Invoke();
+                if (target == ActiveMessages) TranscriptScrollRequested?.Invoke(false);
                 break;
 
             case ClarifyExpireEvent expire:
@@ -2933,56 +3099,58 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
     private void RecomputeTranscriptPresentation(ObservableCollection<MessageItemViewModel> list, bool isTurnRunning)
     {
-        if (list.Count == 0) return;
+        var n = list.Count;
+        if (n == 0) return;
 
-        // Pass 1: classify pre-tool short assistant narrations inside a turn
-        for (var i = 0; i < list.Count; i++)
+        var isProcessNarration = new bool[n];
+        var isRunHeader = new bool[n];
+        var isInStepRun = new bool[n];
+        var isRunExpanded = new bool[n];
+        var isRunLive = new bool[n];
+        var runSummary = new string[n];
+        var isHiddenInCollapsedRun = new bool[n];
+        var runGroupIds = new string?[n];
+
+        var lastUserIndex = -1;
+        for (var i = 0; i < n; i++)
         {
             var m = list[i];
-            m.IsRunHeader = false;
-            m.IsInStepRun = false;
-            m.IsRunExpanded = false;
-            m.IsRunLive = false;
-            m.RunSummaryText = string.Empty;
-            m.IsHiddenInCollapsedRun = false;
-            m.RunGroupId = null;
+            if (m.IsUser) lastUserIndex = i;
 
             if (m.IsAssistantBubble)
             {
                 var followedByStep = false;
-                if (i + 1 < list.Count)
+                if (i + 1 < n)
                 {
                     var next = list[i + 1];
                     followedByStep = next.IsReasoningOnly || next.IsTool;
                 }
-                m.IsProcessNarration = TranscriptRunHelper.IsPreToolNarration(
+                isProcessNarration[i] = TranscriptRunHelper.IsPreToolNarration(
                     m.Content, m.HasAttachments, m.IsStreaming, followedByStep);
-            }
-            else
-            {
-                m.IsProcessNarration = false;
             }
         }
 
         // Pass 2: group contiguous process items (ReasoningOnly, StandardTool, ProcessNarration)
         var idx = 0;
-        while (idx < list.Count)
+        while (idx < n)
         {
-            if (!IsProcessRunItem(list[idx]))
+            if (!IsProcessRunCandidate(list[idx], isProcessNarration[idx]))
             {
                 idx++;
                 continue;
             }
 
             var start = idx;
-            while (idx < list.Count && IsProcessRunItem(list[idx]))
+            while (idx < n && IsProcessRunCandidate(list[idx], isProcessNarration[idx]))
             {
                 idx++;
             }
             var end = idx - 1;
             var count = end - start + 1;
             var runId = list[start].Id;
-            var isLiveRun = isTurnRunning && end == list.Count - 1;
+            // Keep any run belonging to the currently active turn expanded while the turn is running
+            // so thinking/tool calls do not collapse mid-turn when a partial reply begins.
+            var isLiveRun = isTurnRunning && (start > lastUserIndex || end == n - 1);
 
             if (count >= 2)
             {
@@ -3003,26 +3171,39 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 var summary = TranscriptRunHelper.FormatStepRunSummary(count, distinctLabels, isLiveRun);
                 for (var k = start; k <= end; k++)
                 {
-                    var step = list[k];
-                    step.RunGroupId = runId;
-                    step.IsInStepRun = true;
-                    step.IsRunHeader = k == start;
-                    step.IsRunExpanded = expanded;
-                    step.IsRunLive = isLiveRun;
-                    step.RunSummaryText = k == start ? summary : string.Empty;
-                    step.IsHiddenInCollapsedRun = !expanded;
+                    runGroupIds[k] = runId;
+                    isInStepRun[k] = true;
+                    isRunHeader[k] = k == start;
+                    isRunExpanded[k] = expanded;
+                    isRunLive[k] = isLiveRun;
+                    runSummary[k] = k == start ? summary : string.Empty;
+                    isHiddenInCollapsedRun[k] = !expanded;
                 }
             }
             else
             {
-                list[start].RunGroupId = runId;
-                list[start].IsInStepRun = true;
+                runGroupIds[start] = runId;
+                isInStepRun[start] = true;
             }
+        }
+
+        // Apply only changed fields so prior turns never toggle visibility true->false->true on every event.
+        for (var i = 0; i < n; i++)
+        {
+            var m = list[i];
+            m.RunGroupId = runGroupIds[i];
+            m.IsProcessNarration = isProcessNarration[i];
+            m.IsInStepRun = isInStepRun[i];
+            m.IsRunHeader = isRunHeader[i];
+            m.IsRunExpanded = isRunExpanded[i];
+            m.IsRunLive = isRunLive[i];
+            m.RunSummaryText = runSummary[i];
+            m.IsHiddenInCollapsedRun = isHiddenInCollapsedRun[i];
         }
     }
 
-    private static bool IsProcessRunItem(MessageItemViewModel item) =>
-        item.IsReasoningOnly || item.IsStandardTool || (item.IsAssistantBubble && item.IsProcessNarration);
+    private static bool IsProcessRunCandidate(MessageItemViewModel item, bool isProcessNarration) =>
+        item.IsReasoningOnly || item.IsStandardTool || (item.IsAssistantBubble && isProcessNarration);
 
     private MessageItemViewModel EnsureStreamingAssistant(ObservableCollection<MessageItemViewModel> target)
     {

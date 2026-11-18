@@ -3,23 +3,36 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
+using HermesDesktop.App.Controls;
 using HermesDesktop.App.ViewModels;
 
 namespace HermesDesktop.App.Views;
 
 public partial class MainWindow : Window
 {
-    private int _scrollPending;
+    private readonly TranscriptAutoScrollController? _transcriptAutoScroll;
 
     public MainWindow()
     {
         InitializeComponent();
 
+        if (TranscriptScroller is not null)
+        {
+            _transcriptAutoScroll = new TranscriptAutoScrollController(TranscriptScroller);
+            _transcriptAutoScroll.StickyChanged += sticky =>
+            {
+                if (JumpToLatestButton is not null)
+                {
+                    JumpToLatestButton.IsVisible = !sticky;
+                }
+            };
+        }
+
         DataContextChanged += (_, _) =>
         {
             if (DataContext is MainViewModel vm)
             {
-                vm.TranscriptScrollRequested += ScrollTranscriptToBottom;
+                vm.TranscriptScrollRequested += force => _transcriptAutoScroll?.RequestScrollToBottom(force);
                 vm.HtmlPreviewContentLoaded += html => LoadPreviewHtml(html, vm.HtmlPreviewZoom);
                 vm.HtmlPreviewZoomChanged += zoom => _ = ApplyPreviewZoomAsync(zoom);
             }
@@ -58,20 +71,9 @@ public partial class MainWindow : Window
         return headClose >= 0 ? html.Insert(headClose, styleTag) : styleTag + html;
     }
 
-    private void ScrollTranscriptToBottom()
+    private void OnJumpToLatestClick(object? sender, RoutedEventArgs e)
     {
-        if (Interlocked.Exchange(ref _scrollPending, 1) != 0) return;
-        Dispatcher.UIThread.Post(() =>
-        {
-            try
-            {
-                TranscriptScroller?.ScrollToEnd();
-            }
-            finally
-            {
-                Interlocked.Exchange(ref _scrollPending, 0);
-            }
-        }, DispatcherPriority.Background);
+        _transcriptAutoScroll?.RequestScrollToBottom(force: true);
     }
 
     private void OnComposerKeyDown(object? sender, KeyEventArgs e)

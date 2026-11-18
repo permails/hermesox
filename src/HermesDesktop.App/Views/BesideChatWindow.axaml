@@ -22,7 +22,7 @@
       </Grid>
     </Border>
 
-    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+    <ScrollViewer Grid.Row="1" x:Name="BesideScroller" VerticalScrollBarVisibility="Auto">
       <ItemsControl ItemsSource="{Binding BesideMessages}">
         <ItemsControl.ItemTemplate>
           <DataTemplate x:DataType="vm:MessageItemViewModel">

@@ -129,16 +129,37 @@
         <Grid IsVisible="{Binding IsChatsTab}" ColumnDefinitions="280,*,Auto,Auto">
           <!-- Left Sessions Column -->
           <Border Grid.Column="0" Background="Transparent" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="0,0,1,0" Padding="10,12">
-            <Grid RowDefinitions="Auto,*">
+            <Grid RowDefinitions="Auto,Auto,*">
               <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,8">
                 <TextBox Grid.Column="0" Text="{Binding SessionSearchQuery}" Watermark="{Binding Loc.SearchSessionsWatermark}"/>
                 <Button Grid.Column="1" Classes="accent" Content="{Binding Loc.NewShort}" Command="{Binding CreateNewSessionCommand}" Margin="8,0,0,0" Padding="12,7"/>
               </Grid>
 
-              <ListBox Grid.Row="1" Classes="sessions" ItemsSource="{Binding FilteredSessions}" SelectedItem="{Binding ActiveSession}" Background="Transparent">
+              <Border Grid.Row="1" IsVisible="{Binding IsConfirmingDeleteSession}" Margin="0,0,0,8" Padding="10,8" CornerRadius="6"
+                      Background="{DynamicResource WinErrorBannerFillBrush}" BorderBrush="{DynamicResource WinErrorBannerStrokeBrush}" BorderThickness="1">
+                <StackPanel Spacing="6">
+                  <TextBlock Text="{Binding PendingDeleteSessionPrompt}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap"
+                             Foreground="{DynamicResource WinErrorBannerTextBrush}"/>
+                  <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
+                    <Button Classes="subtle" Content="{Binding Loc.Keep}" Padding="10,4" FontSize="11.5"
+                            Command="{Binding CancelDeleteSessionCommand}" IsEnabled="{Binding !IsDeletingSession}"/>
+                    <Button Classes="accent" Content="{Binding Loc.YesDelete}" Padding="10,4" FontSize="11.5"
+                            Command="{Binding ConfirmDeleteSessionCommand}" IsEnabled="{Binding !IsDeletingSession}"/>
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+
+              <ListBox Grid.Row="2" Classes="sessions" ItemsSource="{Binding FilteredSessions}" SelectedItem="{Binding ActiveSession}" Background="Transparent">
                 <ListBox.ItemTemplate>
                   <DataTemplate x:DataType="models:SessionSummary">
-                    <Grid ColumnDefinitions="*,Auto">
+                    <Grid ColumnDefinitions="*,Auto" Background="Transparent">
+                      <Grid.ContextMenu>
+                        <ContextMenu>
+                          <MenuItem Header="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.DeleteSession}"
+                                    Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).RequestDeleteSessionCommand}"
+                                    CommandParameter="{Binding}"/>
+                        </ContextMenu>
+                      </Grid.ContextMenu>
                       <StackPanel Grid.Column="0" Spacing="3" Margin="0,0,6,0">
                         <Grid ColumnDefinitions="Auto,*,Auto">
                           <Ellipse Grid.Column="0" Width="7" Height="7" Fill="{DynamicResource WinAccentFillBrush}"
@@ -167,6 +188,10 @@
                                 ToolTip.Tip="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.OpenInBesideChatTip}"
                                 Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenInBesideChatCommand}"
                                 CommandParameter="{Binding}"/>
+                        <Button Classes="ghost" Content="×" FontSize="13" Foreground="{DynamicResource WinErrorBannerTextBrush}"
+                                ToolTip.Tip="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.DeleteSessionTip}"
+                                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).RequestDeleteSessionCommand}"
+                                CommandParameter="{Binding}"/>
                       </StackPanel>
                     </Grid>
                   </DataTemplate>
@@ -190,12 +215,20 @@
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                   <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsRunningTurn}" Width="68" Height="4" Foreground="{DynamicResource WinAccentFillBrush}" VerticalAlignment="Center"/>
                   <Button Classes="subtle" Content="{Binding Loc.Stop}" IsVisible="{Binding IsRunningTurn}" Command="{Binding InterruptTurnCommand}"/>
+                  <Button Classes="ghost" Content="×" FontSize="14" Padding="8,4"
+                          Foreground="{DynamicResource WinErrorBannerTextBrush}"
+                          ToolTip.Tip="{Binding Loc.DeleteSessionTip}"
+                          IsVisible="{Binding HasActiveSession}"
+                          IsEnabled="{Binding !IsRunningTurn}"
+                          Command="{Binding RequestDeleteSessionCommand}"
+                          CommandParameter="{Binding ActiveSession}"/>
                 </StackPanel>
               </Grid>
             </Border>
 
             <!-- Transcript -->
-            <ScrollViewer Grid.Row="1" x:Name="TranscriptScroller" VerticalScrollBarVisibility="Auto">
+            <Grid Grid.Row="1">
+            <ScrollViewer x:Name="TranscriptScroller" VerticalScrollBarVisibility="Auto">
               <StackPanel Margin="4,4,18,12" Spacing="2">
                 <ItemsControl ItemsSource="{Binding ActiveMessages}">
                   <ItemsControl.ItemTemplate>
@@ -436,6 +469,18 @@
                 </Border>
               </StackPanel>
             </ScrollViewer>
+            <Button x:Name="JumpToLatestButton"
+                    IsVisible="False"
+                    Classes="accent"
+                    Content="{Binding Loc.JumpToLatest}"
+                    Padding="12,6"
+                    FontSize="12"
+                    CornerRadius="14"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Bottom"
+                    Margin="0,0,22,10"
+                    Click="OnJumpToLatestClick"/>
+            </Grid>
 
             <!-- Composer Bar -->
             <Border Grid.Row="2" Classes="card" Padding="10" Margin="0,10,0,0">

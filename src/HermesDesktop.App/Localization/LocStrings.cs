@@ -51,6 +51,14 @@ public sealed class LocStrings : INotifyPropertyChanged
     public string SearchSessionsWatermark => L("Search sessions...", "搜索会话...");
     public string PinUnpinTip => L("Pin / Unpin", "置顶 / 取消置顶");
     public string OpenInBesideChatTip => L("Open in Beside Chat", "在右侧并行窗口打开");
+    public string DeleteSessionTip => L("Delete session", "删除会话");
+    public string DeleteSession => L("Delete Session", "删除会话");
+    public string ConfirmDeleteSessionPrefix => L("Delete conversation ", "确认删除会话「");
+    public string ConfirmDeleteSessionSuffix => L("?", "」？");
+    public string StopBeforeDeleteSession => L(
+        "Stop the active response before deleting this session.",
+        "请先停止当前正在生成的回复，再删除该会话。");
+    public string JumpToLatest => L("↓ Latest", "↓ 回到最新");
     public string SelectOrStartChat => L("Select or start a chat", "选择或新建一个对话");
     public string Stop => L("Stop", "停止");
     public string Thought => L("Thought", "思考");

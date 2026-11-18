@@ -12,12 +12,17 @@ public sealed class HermesRestClient : IDisposable
     private readonly string _baseUrl;
     private readonly DashboardSecrets? _secrets;
     private readonly HttpClient _http;
+    private bool _supportsMutationSnapshot = true;
 
-    public HermesRestClient(string baseUrl, AuthSessionTicket auth, DashboardSecrets? secrets = null)
+    public HermesRestClient(
+        string baseUrl,
+        AuthSessionTicket auth,
+        DashboardSecrets? secrets = null,
+        HttpMessageHandler? messageHandler = null)
     {
         _baseUrl = ConnectionURLPolicy.NormalizeBaseUrl(baseUrl);
         _secrets = secrets;
-        var handler = new HttpClientHandler
+        var handler = messageHandler ?? new HttpClientHandler
         {
             CookieContainer = auth.CookieJar,
             UseCookies = true
@@ -336,12 +341,140 @@ public sealed class HermesRestClient : IDisposable
     public Task DeleteProfileAsync(string name, CancellationToken ct = default) =>
         DeleteAsync($"/api/profiles/{Uri.EscapeDataString(name)}", ct);
 
-    public async Task SetSessionPinnedAsync(string sessionId, bool pinned, string? profile = null, CancellationToken ct = default)
+    public Task SetSessionPinnedAsync(string sessionId, bool pinned, string? profile = null, CancellationToken ct = default) =>
+        SendSessionMutationAsync(
+            HttpMethod.Patch,
+            sessionId,
+            new Dictionary<string, object?> { ["pinned"] = pinned },
+            profile,
+            ct);
+
+    /// <summary>
+    /// Deletes a conversation session on the Hermes Gateway, attaching mutation-snapshot identity
+    /// headers/query parameters when supported by the host (and falling back cleanly on older hosts).
+    /// </summary>
+    public Task DeleteSessionAsync(string sessionId, string? profile = null, CancellationToken ct = default) =>
+        SendSessionMutationAsync(HttpMethod.Delete, sessionId, bodyFields: null, profile, ct);
+
+    private sealed record SessionMutationSnapshot(long Revision, long? Generation);
+
+    private async Task SendSessionMutationAsync(
+        HttpMethod method,
+        string sessionId,
+        IReadOnlyDictionary<string, object?>? bodyFields,
+        string? profile,
+        CancellationToken ct)
     {
-        var path = $"/api/sessions/{Uri.EscapeDataString(sessionId)}";
-        if (!string.IsNullOrWhiteSpace(profile)) path += $"?profile={Uri.EscapeDataString(profile)}";
-        await SendJsonAsync(HttpMethod.Patch, path, new { pinned }, ct);
+        var encodedId = Uri.EscapeDataString(sessionId);
+        var basePath = $"/api/sessions/{encodedId}";
+        if (!string.IsNullOrWhiteSpace(profile))
+            basePath += $"?profile={Uri.EscapeDataString(profile)}";
+
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var snapshot = _supportsMutationSnapshot
+                ? await TryGetSessionMutationSnapshotAsync(encodedId, profile, ct)
+                : null;
+
+            var requestPath = basePath;
+            HttpContent? content = null;
+
+            if (method == HttpMethod.Delete)
+            {
+                if (snapshot is not null)
+                {
+                    var sep = requestPath.Contains('?') ? "&" : "?";
+                    requestPath += $"{sep}expected_revision={snapshot.Revision}&request_id={Guid.NewGuid():D}";
+                    if (snapshot.Generation is long gen)
+                        requestPath += $"&expected_generation={gen}";
+                }
+            }
+            else
+            {
+                var payload = new Dictionary<string, object?>();
+                if (bodyFields is not null)
+                {
+                    foreach (var kv in bodyFields) payload[kv.Key] = kv.Value;
+                }
+                if (!string.IsNullOrWhiteSpace(profile))
+                    payload["profile"] = profile;
+                if (snapshot is not null)
+                {
+                    payload["request_id"] = Guid.NewGuid().ToString("D");
+                    payload["expected_revision"] = snapshot.Revision;
+                    if (snapshot.Generation is long gen)
+                        payload["expected_generation"] = gen;
+                }
+                content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+            }
+
+            var uri = new Uri($"{_baseUrl}{requestPath}");
+            using var req = new HttpRequestMessage(method, uri) { Content = content };
+            HermesAuthClient.ApplySecurityHeaders(req.Headers, uri, _secrets);
+            using var resp = await _http.SendAsync(req, ct);
+
+            if (resp.IsSuccessStatusCode) return;
+
+            var detail = await resp.Content.ReadAsStringAsync(ct);
+            if (attempt == 0 && resp.StatusCode == HttpStatusCode.Conflict && IsRetryableMutationConflict(detail))
+            {
+                _supportsMutationSnapshot = true;
+                continue;
+            }
+
+            var message = string.IsNullOrWhiteSpace(detail)
+                ? $"HTTP {(int)resp.StatusCode} ({resp.ReasonPhrase})"
+                : $"HTTP {(int)resp.StatusCode}: {detail.Trim()}";
+            throw new HttpRequestException(message, null, resp.StatusCode);
+        }
     }
+
+    private async Task<SessionMutationSnapshot?> TryGetSessionMutationSnapshotAsync(
+        string encodedId,
+        string? profile,
+        CancellationToken ct)
+    {
+        var path = $"/api/sessions/{encodedId}/mutation-snapshot";
+        if (!string.IsNullOrWhiteSpace(profile))
+            path += $"?profile={Uri.EscapeDataString(profile)}";
+
+        try
+        {
+            var uri = new Uri($"{_baseUrl}{path}");
+            using var req = new HttpRequestMessage(HttpMethod.Get, uri);
+            HermesAuthClient.ApplySecurityHeaders(req.Headers, uri, _secrets);
+            using var resp = await _http.SendAsync(req, ct);
+            if (resp.StatusCode == HttpStatusCode.NotFound)
+            {
+                var body = await resp.Content.ReadAsStringAsync(ct);
+                if (!body.Contains("session", StringComparison.OrdinalIgnoreCase))
+                    _supportsMutationSnapshot = false;
+                return null;
+            }
+            if (!resp.IsSuccessStatusCode) return null;
+
+            await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+            var rev = GetInt64(doc.RootElement, "runtime_revision");
+            if (rev is null or < 0) return null;
+            var gen = GetInt64(doc.RootElement, "runtime_generation");
+            return new SessionMutationSnapshot(rev.Value, gen is >= 0 ? gen : null);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool IsRetryableMutationConflict(string? detail) =>
+        !string.IsNullOrEmpty(detail)
+        && (detail.Contains("revision_conflict", StringComparison.OrdinalIgnoreCase)
+            || detail.Contains("stale_generation", StringComparison.OrdinalIgnoreCase)
+            || detail.Contains("mutation_identity_required", StringComparison.OrdinalIgnoreCase));
 
     public async Task<string> ReadWorkspaceTextAsync(string filePath, string? profile = null, CancellationToken ct = default)
     {
@@ -985,6 +1118,9 @@ public sealed class HermesRestClient : IDisposable
 
     private static int? GetInt(JsonElement obj, string prop) =>
         obj.TryGetProperty(prop, out var el) && el.ValueKind == JsonValueKind.Number && el.TryGetInt32(out var v) ? v : null;
+
+    private static long? GetInt64(JsonElement obj, string prop) =>
+        obj.TryGetProperty(prop, out var el) && el.ValueKind == JsonValueKind.Number && el.TryGetInt64(out var v) ? v : null;
 
     private static double? GetDouble(JsonElement obj, string prop) =>
         obj.TryGetProperty(prop, out var el) && el.ValueKind == JsonValueKind.Number && el.TryGetDouble(out var v) ? v : null;
