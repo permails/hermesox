@@ -175,16 +175,22 @@ public sealed class HermesWsClient : IAsyncDisposable
         }
     }
 
-    public async Task<string> CreateSessionAsync(string? profile = null, string? cwd = null, CancellationToken ct = default)
+    public async Task<SessionCreateResult> CreateSessionAsync(string? profile = null, string? cwd = null, CancellationToken ct = default)
     {
         var p = new Dictionary<string, object?> { ["source"] = "desktop" };
         if (!string.IsNullOrWhiteSpace(profile)) p["profile"] = profile;
         if (!string.IsNullOrWhiteSpace(cwd)) p["cwd"] = cwd;
 
         var res = await RpcAsync("session.create", p, ct: ct);
-        return GetString(res, "session_id")
+        var sid = GetString(res, "session_id")
             ?? GetString(res, "id")
             ?? throw new InvalidOperationException("Gateway did not return session_id.");
+        var storedId = GetString(res, "stored_session_id") ?? GetString(res, "storedSessionId");
+        var resolvedProfile = GetString(res, "profile") ?? GetString(res, "profile_id");
+        return new SessionCreateResult(
+            SessionId: sid,
+            StoredSessionId: string.IsNullOrWhiteSpace(storedId) ? null : storedId.Trim(),
+            Profile: string.IsNullOrWhiteSpace(resolvedProfile) ? null : resolvedProfile.Trim());
     }
 
     public async Task<SessionResumeResult> OpenSessionAsync(

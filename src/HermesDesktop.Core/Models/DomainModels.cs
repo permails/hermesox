@@ -336,6 +336,11 @@ public sealed record GatewayReadyInfo(
     bool SendsChangeEvents,
     string? Version = null);
 
+public sealed record SessionCreateResult(
+    string SessionId,
+    string? StoredSessionId = null,
+    string? Profile = null);
+
 public sealed record SessionResumeResult(
     string SessionId,
     string? StoredSessionId,

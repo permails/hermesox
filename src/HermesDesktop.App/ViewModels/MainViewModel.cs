@@ -16,6 +16,7 @@ using HermesDesktop.Core.Models;
 using HermesDesktop.Core.Rest;
 using HermesDesktop.Core.Rpc;
 using HermesDesktop.Core.Security;
+using HermesDesktop.Core.Sessions;
 using HermesDesktop.Core.Storage;
 using HermesDesktop.Platform.Notifications;
 using HermesDesktop.Platform.Security;
@@ -119,6 +120,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private bool _suppressProfileRefresh;
     private int _sessionsRefreshGeneration;
     private int _openSessionGeneration;
+    private bool _isCreatingSession;
     private readonly Dictionary<string, string> _previewHtmlCache = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, byte[]> _mediaBytesCache = new(StringComparer.Ordinal);
     private bool _botModeSupportsProtocol;
@@ -382,7 +384,15 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             : _tabLayout.Shown.FirstOrDefault(V2Tab.Chats);
         RebuildTabCollections();
 
-        foreach (var d in _cache.LoadDashboards())
+        var (keptDashboards, duplicateDashboards) = SessionCatalogHelper.DeduplicateDashboardsByUrl(
+            _cache.LoadDashboards(),
+            _settings.ActiveDashboardId);
+        foreach (var dup in duplicateDashboards)
+        {
+            _cache.DeleteDashboard(dup.Id);
+            _vault.DeleteSecrets(dup.Id);
+        }
+        foreach (var d in keptDashboards)
         {
             SavedDashboards.Add(d);
         }
@@ -641,7 +651,11 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         try
         {
             var normalized = ConnectionURLPolicy.NormalizeBaseUrl(ConnectUrl);
-            var targetId = EditingDashboardId ?? Guid.NewGuid();
+            var existingByUrl = EditingDashboardId is null
+                ? SavedDashboards.FirstOrDefault(d =>
+                    string.Equals(d.NormalizedUrl, normalized, StringComparison.OrdinalIgnoreCase))
+                : null;
+            var targetId = EditingDashboardId ?? existingByUrl?.Id ?? Guid.NewGuid();
             var dashboard = new SavedDashboard
             {
                 Id = targetId,
@@ -666,6 +680,18 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
             _cache.SaveDashboard(dashboard);
             _vault.SaveSecrets(dashboard.Id, secrets);
+
+            for (var i = SavedDashboards.Count - 1; i >= 0; i--)
+            {
+                var candidate = SavedDashboards[i];
+                if (candidate.Id != dashboard.Id
+                    && string.Equals(candidate.NormalizedUrl, normalized, StringComparison.OrdinalIgnoreCase))
+                {
+                    SavedDashboards.RemoveAt(i);
+                    _cache.DeleteDashboard(candidate.Id);
+                    _vault.DeleteSecrets(candidate.Id);
+                }
+            }
 
             var existingIdx = -1;
             for (var i = 0; i < SavedDashboards.Count; i++)
@@ -972,30 +998,26 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             var previousActive = ActiveSession;
             var previousRuntimeId = _activeRuntimeSessionId;
 
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             _allSessions.Clear();
-            foreach (var s in fetched)
+            foreach (var s in SessionCatalogHelper.DeduplicateSessions(fetched))
             {
-                var key = $"{s.Profile ?? ""}:{s.StoredSessionId ?? s.Id}";
-                if (seen.Add(key))
-                {
-                    _allSessions.Add(s);
-                }
+                _allSessions.Add(s);
             }
 
-            // Retain the currently open session if it hasn't been persisted with min_messages=1 yet
-            // (e.g. a brand-new empty chat), so background sessions.changed events never yank the user away.
+            // Retain the currently open session only if it hasn't been persisted with min_messages=1 yet
+            // (e.g. a brand-new 0-message chat), so background sessions.changed events never yank the user away
+            // and never duplicate an already-persisted session.
             if (previousActive is not null && !string.IsNullOrEmpty(previousActive.Id))
             {
                 var matched = _allSessions.FirstOrDefault(s => SessionsMatch(s, previousActive, previousRuntimeId));
                 if (matched is not null)
                 {
-                    matched.RuntimeSessionId ??= previousRuntimeId ?? previousActive.RuntimeSessionId;
-                    matched.StoredSessionId ??= previousActive.StoredSessionId;
+                    SessionCatalogHelper.MergeAliases(matched, previousActive, previousRuntimeId);
                 }
-                else if (string.IsNullOrEmpty(previousActive.Profile)
-                    || ShowAllProfiles
-                    || string.Equals(previousActive.Profile, SelectedProfile?.Name, StringComparison.OrdinalIgnoreCase))
+                else if (previousActive.MessageCount is null or 0
+                    && (string.IsNullOrEmpty(previousActive.Profile)
+                        || ShowAllProfiles
+                        || string.Equals(previousActive.Profile, SelectedProfile?.Name, StringComparison.OrdinalIgnoreCase)))
                 {
                     _allSessions.Insert(0, previousActive);
                 }
@@ -1047,20 +1069,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private static bool SessionsMatch(SessionSummary candidate, SessionSummary target, string? targetRuntimeId)
-    {
-        if (ReferenceEquals(candidate, target)) return true;
-        var candidateIds = new HashSet<string>(StringComparer.Ordinal) { candidate.Id };
-        if (!string.IsNullOrEmpty(candidate.StoredSessionId)) candidateIds.Add(candidate.StoredSessionId);
-        if (!string.IsNullOrEmpty(candidate.RuntimeSessionId)) candidateIds.Add(candidate.RuntimeSessionId);
-        foreach (var alt in candidate.AlternateIds) candidateIds.Add(alt);
-
-        if (candidateIds.Contains(target.Id)) return true;
-        if (!string.IsNullOrEmpty(target.StoredSessionId) && candidateIds.Contains(target.StoredSessionId)) return true;
-        if (!string.IsNullOrEmpty(target.RuntimeSessionId) && candidateIds.Contains(target.RuntimeSessionId)) return true;
-        if (!string.IsNullOrEmpty(targetRuntimeId) && candidateIds.Contains(targetRuntimeId)) return true;
-        return target.AlternateIds.Any(candidateIds.Contains);
-    }
+    private static bool SessionsMatch(SessionSummary candidate, SessionSummary target, string? targetRuntimeId) =>
+        SessionCatalogHelper.SessionsMatch(candidate, target, targetRuntimeId);
 
     private async Task SelectAndOpenSessionAsync(SessionSummary session)
     {
@@ -1073,37 +1083,64 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand]
     private async Task CreateNewSessionAsync()
     {
-        if (_wsClient is null || !_wsClient.IsConnected) return;
+        if (_wsClient is null || !_wsClient.IsConnected || _isCreatingSession) return;
+        _isCreatingSession = true;
         try
         {
-            var id = await _wsClient.CreateSessionAsync(SelectedProfile?.Name);
-            AppDiagnostics.Log("SESSION", $"Created new session id={id} profile={SelectedProfile?.Name ?? "default"}");
+            var created = await _wsClient.CreateSessionAsync(SelectedProfile?.Name);
+            var durableId = !string.IsNullOrWhiteSpace(created.StoredSessionId)
+                ? created.StoredSessionId
+                : created.SessionId;
+            var alts = new HashSet<string>(StringComparer.Ordinal);
+            if (!string.IsNullOrWhiteSpace(created.SessionId) && created.SessionId != durableId)
+            {
+                alts.Add(created.SessionId);
+            }
+            if (!string.IsNullOrWhiteSpace(created.StoredSessionId) && created.StoredSessionId != durableId)
+            {
+                alts.Add(created.StoredSessionId);
+            }
+
+            AppDiagnostics.Log("SESSION", $"Created new session id={created.SessionId} stored={created.StoredSessionId} profile={created.Profile ?? SelectedProfile?.Name ?? "default"}");
+            Interlocked.Increment(ref _sessionsRefreshGeneration);
+
             var summary = new SessionSummary
             {
-                Id = id,
-                StoredSessionId = id,
-                RuntimeSessionId = id,
+                Id = durableId,
+                StoredSessionId = durableId,
+                RuntimeSessionId = created.SessionId,
+                AlternateIds = [.. alts],
                 Title = "New Chat",
-                Profile = SelectedProfile?.Name,
+                Profile = created.Profile ?? SelectedProfile?.Name,
                 UpdatedLabel = "Just now",
                 LastActivityAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                 MessageCount = 0
             };
-            _allSessions.Insert(0, summary);
-            ApplySessionFilter(summary, id);
+
+            var existing = _allSessions.FirstOrDefault(s => SessionsMatch(s, summary, created.SessionId));
+            if (existing is not null)
+            {
+                SessionCatalogHelper.MergeAliases(existing, summary, created.SessionId);
+                summary = existing;
+            }
+            else
+            {
+                _allSessions.Insert(0, summary);
+            }
 
             Interlocked.Increment(ref _openSessionGeneration);
-            ClearActiveTranscriptState(id);
+            ClearActiveTranscriptState(created.SessionId);
+            ApplySessionFilter(summary, created.SessionId);
             ComposerText = "";
-
-            _suppressSelectionOpen = true;
-            ActiveSession = summary;
-            _suppressSelectionOpen = false;
             SelectedTab = V2Tab.Chats;
         }
         catch (Exception ex)
         {
             StatusBanner = $"Create chat failed: {ex.Message}";
+        }
+        finally
+        {
+            _isCreatingSession = false;
         }
     }
 
@@ -1133,6 +1170,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             {
                 session.StoredSessionId = resume.StoredSessionId;
             }
+            SessionCatalogHelper.MergeAliases(session, session, resume.SessionId);
             AppDiagnostics.Log("SESSION", $"Opened key={resumeKey} -> runtime={resume.SessionId}, stored={resume.StoredSessionId}, running={resume.IsRunning}");
 
             IsRunningTurn = resume.IsRunning;
@@ -2901,13 +2939,14 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
         if (ev is SessionTitleEvent titleEv)
         {
-            var match = _allSessions.FirstOrDefault(s =>
-                s.Id == titleEv.StoredSessionId
-                || s.Id == titleEv.RuntimeSessionId
-                || s.RuntimeSessionId == titleEv.RuntimeSessionId);
-            if (match is not null)
+            if (SessionCatalogHelper.ApplyTitleUpdate(_allSessions, titleEv.StoredSessionId, titleEv.RuntimeSessionId, titleEv.Title))
             {
-                match.Title = titleEv.Title;
+                var deduped = SessionCatalogHelper.DeduplicateSessions(_allSessions);
+                if (deduped.Count != _allSessions.Count)
+                {
+                    _allSessions.Clear();
+                    _allSessions.AddRange(deduped);
+                }
                 ApplySessionFilter();
             }
             return;
