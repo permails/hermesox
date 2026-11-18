@@ -461,13 +461,15 @@
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
-                <Border IsVisible="{Binding IsRunningTurn}" HorizontalAlignment="Left" Margin="8,6,0,6"
-                        Background="{DynamicResource WinCardSecondaryBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}"
-                        BorderThickness="1" CornerRadius="6" Padding="12,7">
-                  <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Border Width="8" Height="8" CornerRadius="4" Background="{DynamicResource WinAccentFillBrush}" VerticalAlignment="Center"/>
-                    <TextBlock Text="{Binding Loc.AgentWorkingNotice}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}" VerticalAlignment="Center"/>
-                  </StackPanel>
+                <Border Height="34" Margin="8,6,0,6" HorizontalAlignment="Left">
+                  <Border IsVisible="{Binding IsRunningTurn}" VerticalAlignment="Center"
+                          Background="{DynamicResource WinCardSecondaryBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}"
+                          BorderThickness="1" CornerRadius="6" Padding="12,6">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <Border Width="8" Height="8" CornerRadius="4" Background="{DynamicResource WinAccentFillBrush}" VerticalAlignment="Center"/>
+                      <TextBlock Text="{Binding Loc.AgentWorkingNotice}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}" VerticalAlignment="Center"/>
+                    </StackPanel>
+                  </Border>
                 </Border>
               </StackPanel>
             </ScrollViewer>

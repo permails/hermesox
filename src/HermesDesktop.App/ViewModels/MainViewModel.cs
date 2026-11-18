@@ -3219,6 +3219,13 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
             if (count >= 2)
             {
+                if (isLiveRun && !_userCollapsedRunIds.Contains(runId))
+                {
+                    // Once a run has expanded live in front of the user, keep it expanded after the
+                    // turn finishes so the transcript never snaps upward under the user's eyes.
+                    _userExpandedRunIds.Add(runId);
+                }
+
                 var expanded = _userExpandedRunIds.Contains(runId)
                     || (!_userCollapsedRunIds.Contains(runId) && isLiveRun);
 
