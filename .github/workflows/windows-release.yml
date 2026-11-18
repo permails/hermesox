@@ -107,6 +107,30 @@ jobs:
           path: dist/HermesDesktop-Setup-${{ steps.meta.outputs.version }}-win-x64.exe
           if-no-files-found: error
 
+      - name: Package Portable Green ZIP (when SignPath disabled)
+        if: ${{ vars.ENABLE_SIGNPATH != 'true' }}
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.meta.outputs.version }}"
+          $portableName = "HermesDesktop-Portable-$ver-win-x64"
+          $portableDir = Join-Path $PWD "dist\$portableName"
+          $portableZip = Join-Path $PWD "dist\$portableName.zip"
+          Copy-Item -Path "dist\win-x64-stage" -Destination $portableDir -Recurse -Force
+          $dataDir = Join-Path $portableDir "data"
+          New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+          "Hermes Desktop stores settings, cache, and vault files in this ./data directory when present." |
+            Out-File -FilePath (Join-Path $dataDir ".portable") -Encoding utf8
+          Compress-Archive -Path $portableDir -DestinationPath $portableZip -Force
+          Get-FileHash $portableZip -Algorithm SHA256 | Format-List | Out-String
+
+      - name: Upload Unsigned Portable Artifact
+        if: ${{ vars.ENABLE_SIGNPATH != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-portable
+          path: dist/HermesDesktop-Portable-${{ steps.meta.outputs.version }}-win-x64.zip
+          if-no-files-found: error
+
   sign-app:
     name: Sign App Binaries via SignPath
     needs: build-app
@@ -188,6 +212,27 @@ jobs:
           path: dist/HermesDesktop-Setup-${{ needs.build-app.outputs.version }}-win-x64.exe
           if-no-files-found: error
 
+      - name: Package Portable Green ZIP (with signed app binaries)
+        shell: pwsh
+        run: |
+          $ver = "${{ needs.build-app.outputs.version }}"
+          $portableName = "HermesDesktop-Portable-$ver-win-x64"
+          $portableDir = Join-Path $PWD "dist\$portableName"
+          $portableZip = Join-Path $PWD "dist\$portableName.zip"
+          Copy-Item -Path "dist\win-x64-stage" -Destination $portableDir -Recurse -Force
+          $dataDir = Join-Path $portableDir "data"
+          New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+          "Hermes Desktop stores settings, cache, and vault files in this ./data directory when present." |
+            Out-File -FilePath (Join-Path $dataDir ".portable") -Encoding utf8
+          Compress-Archive -Path $portableDir -DestinationPath $portableZip -Force
+
+      - name: Upload Signed Portable Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-portable
+          path: dist/HermesDesktop-Portable-${{ needs.build-app.outputs.version }}-win-x64.zip
+          if-no-files-found: error
+
   sign-installer:
     name: Sign Installer via SignPath
     needs: [build-app, package-signed-installer]
@@ -224,10 +269,11 @@ jobs:
     if: ${{ always() && startsWith(github.ref, 'refs/tags/v') && needs.build-app.result == 'success' && (vars.ENABLE_SIGNPATH != 'true') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Download Unsigned Installer Artifact
+      - name: Download Unsigned Installer & Portable Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: windows-installer
+          pattern: windows-*
+          merge-multiple: true
           path: ./release-assets
 
       - name: Create Release (Unsigned Preview)
@@ -242,10 +288,11 @@ jobs:
     if: ${{ startsWith(github.ref, 'refs/tags/v') && vars.ENABLE_SIGNPATH == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Download Signed Installer Artifact
+      - name: Download Signed Installer & Portable Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: windows-installer
+          pattern: windows-*
+          merge-multiple: true
           path: ./release-assets
 
       - name: Create Release (Signed)
