@@ -768,20 +768,14 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         }
         _restClient?.Dispose();
 
-        var dashboardChanged = _activeDashboard?.Id != dashboard.Id;
+        var dashboardChanged = _activeDashboard is null
+            || _activeDashboard.Id != dashboard.Id
+            || !string.Equals(_activeDashboard.NormalizedUrl, dashboard.NormalizedUrl, StringComparison.OrdinalIgnoreCase);
         _activeDashboard = dashboard;
         _restClient = new HermesRestClient(dashboard.NormalizedUrl, ticket, secrets);
         if (dashboardChanged)
         {
-            _serverMaintenanceCts?.Cancel();
-            HermesVersionLabel = "—";
-            HermesUpdateStatusText = "";
-            HermesUpdateDetailText = null;
-            HermesUpdateManualCommand = null;
-            HermesUpdateCommitsSummary = null;
-            CanApplyHermesUpdate = false;
-            HasHermesUpdateConfirm = false;
-            GatewayMaintainStatusText = null;
+            ResetServerScopedState();
         }
         OnPropertyChanged(nameof(IsServerMaintenanceIdle));
         _wsClient = new HermesWsClient();
@@ -794,6 +788,106 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         StatusBanner = $"Connected · {dashboard.Label}";
 
         await RefreshProfilesAndSessionsAsync();
+    }
+
+    private void ClearActiveTranscriptState(string? runtimeSessionId = null)
+    {
+        _activeRuntimeSessionId = runtimeSessionId;
+        _streamBufferSessionId = null;
+        _streamFlushTimer.Stop();
+        _streamContentBuffer.Clear();
+        _streamReasoningBuffer.Clear();
+        if (_streamingAssistantMessage is not null) _streamingAssistantMessage.IsStreaming = false;
+        _streamingAssistantMessage = null;
+        _activeTools.Clear();
+        ActiveMessages.Clear();
+        IsRunningTurn = false;
+    }
+
+    /// <summary>
+    /// Clears all session, transcript, profile, and secondary-tab state from a previous Hermes host
+    /// so switching servers never leaks stale sessions (such as an unpersisted ActiveSession) into the new list.
+    /// </summary>
+    private void ResetServerScopedState()
+    {
+        Interlocked.Increment(ref _openSessionGeneration);
+        Interlocked.Increment(ref _sessionsRefreshGeneration);
+        _turnWatchdogCts?.Cancel();
+        _serverMaintenanceCts?.Cancel();
+
+        ClearActiveTranscriptState();
+        PendingDeleteSession = null;
+        DeleteSessionError = null;
+        IsDeletingSession = false;
+        IsLoadingMessages = false;
+
+        _suppressSelectionOpen = true;
+        try
+        {
+            ActiveSession = null;
+            _allSessions.Clear();
+            FilteredSessions.Clear();
+        }
+        finally
+        {
+            _suppressSelectionOpen = false;
+        }
+
+        ComposerText = "";
+        SessionSearchQuery = "";
+        CurrentModelLabel = "default";
+        ContextPercent = 0;
+        ContextUsed = 0;
+        ContextMax = 0;
+        CurrentCwd = null;
+        _userExpandedRunIds.Clear();
+        _userCollapsedRunIds.Clear();
+
+        BesideSession = null;
+        BesideMessages.Clear();
+        BesideComposerText = "";
+        IsBesideVisible = false;
+
+        _suppressProfileRefresh = true;
+        try
+        {
+            SelectedProfile = null;
+            ProfileChips.Clear();
+        }
+        finally
+        {
+            _suppressProfileRefresh = false;
+        }
+
+        CronJobs.Clear();
+        KanbanBoards.Clear();
+        SelectedKanbanBoard = null;
+        KanbanTasks.Clear();
+        PulseItems.Clear();
+        ArtifactItems.Clear();
+        TasksStatusNotice = null;
+        PulseStatusNotice = null;
+        ArtifactsStatusNotice = null;
+        NeedsYouCount = 0;
+
+        _previewHtmlCache.Clear();
+        _mediaBytesCache.Clear();
+        IsPreviewModalOpen = false;
+        IsImageViewerOpen = false;
+        IsHtmlPreviewPaneOpen = false;
+        IsSoulEditorOpen = false;
+        IsConfirmingDeleteProfile = false;
+        IsCronEditorOpen = false;
+        IsConfirmingDeleteCronJob = false;
+
+        HermesVersionLabel = "—";
+        HermesUpdateStatusText = "";
+        HermesUpdateDetailText = null;
+        HermesUpdateManualCommand = null;
+        HermesUpdateCommitsSummary = null;
+        CanApplyHermesUpdate = false;
+        HasHermesUpdateConfirm = false;
+        GatewayMaintainStatusText = null;
     }
 
     [RelayCommand]
@@ -999,16 +1093,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             ApplySessionFilter(summary, id);
 
             Interlocked.Increment(ref _openSessionGeneration);
-            _activeRuntimeSessionId = id;
-            _streamBufferSessionId = null;
-            _streamFlushTimer.Stop();
-            _streamContentBuffer.Clear();
-            _streamReasoningBuffer.Clear();
-            if (_streamingAssistantMessage is not null) _streamingAssistantMessage.IsStreaming = false;
-            _streamingAssistantMessage = null;
-            _activeTools.Clear();
-            ActiveMessages.Clear();
-            IsRunningTurn = false;
+            ClearActiveTranscriptState(id);
             ComposerText = "";
 
             _suppressSelectionOpen = true;
@@ -1030,16 +1115,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         IsLoadingMessages = true;
         // Clear previous runtime session ID immediately so in-flight stream events
         // from the old session cannot leak into this session while resume is awaiting.
-        _activeRuntimeSessionId = null;
-        _streamBufferSessionId = null;
-        _streamFlushTimer.Stop();
-        _streamContentBuffer.Clear();
-        _streamReasoningBuffer.Clear();
-        if (_streamingAssistantMessage is not null) _streamingAssistantMessage.IsStreaming = false;
-        _streamingAssistantMessage = null;
-        _activeTools.Clear();
-        ActiveMessages.Clear();
-        IsRunningTurn = false;
+        ClearActiveTranscriptState();
 
         ComposerText = _cache.LoadDraft(DraftKey(session.Id)) ?? "";
 
@@ -1175,18 +1251,9 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             if (deletedActive)
             {
                 Interlocked.Increment(ref _openSessionGeneration);
-                _activeRuntimeSessionId = null;
-                _streamBufferSessionId = null;
-                _streamFlushTimer.Stop();
-                _streamContentBuffer.Clear();
-                _streamReasoningBuffer.Clear();
-                if (_streamingAssistantMessage is not null) _streamingAssistantMessage.IsStreaming = false;
-                _streamingAssistantMessage = null;
-                _activeTools.Clear();
-                ActiveMessages.Clear();
-                IsRunningTurn = false;
-                ComposerText = "";
+                ClearActiveTranscriptState();
                 ActiveSession = null;
+                ComposerText = "";
             }
 
             ApplySessionFilter();
