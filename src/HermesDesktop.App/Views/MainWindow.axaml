@@ -522,19 +522,65 @@
             </Grid>
 
             <!-- Composer Bar -->
-            <Border Grid.Row="3" Classes="card" Padding="10" Margin="0,10,0,0">
-              <Grid ColumnDefinitions="*,Auto">
-                <TextBox Grid.Column="0" x:Name="ComposerInput" Text="{Binding ComposerText}"
-                         AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="140"
-                         Watermark="{Binding Loc.ComposerWatermark}"
-                         KeyDown="OnComposerKeyDown"/>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Bottom" Margin="8,0,0,0">
-                  <Button Classes="subtle" Content="{Binding Loc.StopTurn}" IsVisible="{Binding IsRunningTurn}" Command="{Binding InterruptTurnCommand}"/>
-                  <Button Classes="subtle" Content="{Binding Loc.Steer}" IsVisible="{Binding IsRunningTurn}" Command="{Binding SteerTurnCommand}"/>
-                  <Button Classes="accent" Content="{Binding Loc.Queue}" IsVisible="{Binding IsRunningTurn}" Command="{Binding SendOrQueueCommand}"/>
-                  <Button Classes="accent" Content="{Binding Loc.Send}" IsVisible="{Binding !IsRunningTurn}" Command="{Binding SendOrQueueCommand}"/>
+            <Border x:Name="ComposerDropTarget" Grid.Row="3" Classes="card" Padding="10" Margin="0,10,0,0" DragDrop.AllowDrop="True">
+              <StackPanel Spacing="8">
+                <ItemsControl ItemsSource="{Binding PendingAttachments}" IsVisible="{Binding HasPendingAttachments}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <WrapPanel Orientation="Horizontal"/>
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:PendingAttachmentItem">
+                      <Border Margin="0,0,6,4" Padding="6,4" CornerRadius="6"
+                              Background="{DynamicResource WinControlFillBrush}"
+                              BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="1">
+                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                          <Border IsVisible="{Binding IsImage}" Width="34" Height="34" CornerRadius="4" ClipToBounds="True">
+                            <Image Source="{Binding Thumbnail}" Stretch="UniformToFill"/>
+                          </Border>
+                          <TextBlock IsVisible="{Binding IsFileBadge}" Text="📄" FontSize="14" VerticalAlignment="Center"/>
+                          <StackPanel VerticalAlignment="Center" MaxWidth="160">
+                            <TextBlock Text="{Binding Name}" FontSize="11.5" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource WinTextPrimaryBrush}" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock Text="{Binding SizeLabel}" FontSize="10"
+                                       Foreground="{DynamicResource WinTextTertiaryBrush}"/>
+                          </StackPanel>
+                          <Button Classes="ghost" Content="✕" FontSize="10.5" Padding="4,2" VerticalAlignment="Center"
+                                  ToolTip.Tip="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.RemoveAttachmentTip}"
+                                  Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).RemovePendingAttachmentCommand}"
+                                  CommandParameter="{Binding}"/>
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsUploadingAttachments}">
+                  <ProgressBar IsIndeterminate="True" Width="64" Height="4" Foreground="{DynamicResource WinAccentFillBrush}" VerticalAlignment="Center"/>
+                  <TextBlock Text="{Binding Loc.UploadingAttachments}" FontSize="11.5" Foreground="{DynamicResource WinTextSecondaryBrush}" VerticalAlignment="Center"/>
                 </StackPanel>
-              </Grid>
+
+                <Grid ColumnDefinitions="Auto,*,Auto">
+                  <Button Grid.Column="0" Classes="subtle" Content="📎" Padding="9,7" Margin="0,0,8,0"
+                          VerticalAlignment="Bottom"
+                          ToolTip.Tip="{Binding Loc.AttachFilesTip}"
+                          IsEnabled="{Binding !IsUploadingAttachments}"
+                          Click="OnAttachFilesClick"/>
+                  <TextBox Grid.Column="1" x:Name="ComposerInput" Text="{Binding ComposerText}"
+                           AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="140"
+                           Watermark="{Binding Loc.ComposerWatermark}"
+                           KeyDown="OnComposerKeyDown"/>
+                  <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Bottom" Margin="8,0,0,0">
+                    <Button Classes="subtle" Content="{Binding Loc.StopTurn}" IsVisible="{Binding IsRunningTurn}" Command="{Binding InterruptTurnCommand}"/>
+                    <Button Classes="subtle" Content="{Binding Loc.Steer}" IsVisible="{Binding IsRunningTurn}" Command="{Binding SteerTurnCommand}"/>
+                    <Button Classes="accent" Content="{Binding Loc.Queue}" IsVisible="{Binding IsRunningTurn}"
+                            IsEnabled="{Binding !IsUploadingAttachments}" Command="{Binding SendOrQueueCommand}"/>
+                    <Button Classes="accent" Content="{Binding Loc.Send}" IsVisible="{Binding !IsRunningTurn}"
+                            IsEnabled="{Binding !IsUploadingAttachments}" Command="{Binding SendOrQueueCommand}"/>
+                  </StackPanel>
+                </Grid>
+              </StackPanel>
             </Border>
           </Grid>
 

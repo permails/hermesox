@@ -42,6 +42,19 @@ public sealed partial class V2TabOptionViewModel(V2Tab tab, bool isVisible, bool
     }
 }
 
+public sealed class PendingAttachmentItem
+{
+    public string Id { get; } = Guid.NewGuid().ToString("N");
+    public required string Name { get; init; }
+    public required byte[] Bytes { get; init; }
+    public required string MimeType { get; init; }
+    public required AttachmentKind Kind { get; init; }
+    public string SizeLabel => AttachmentUploadHelper.FormatFileSize(Bytes.Length);
+    public Bitmap? Thumbnail { get; init; }
+    public bool IsImage => Kind == AttachmentKind.Image && Thumbnail is not null;
+    public bool IsFileBadge => !IsImage;
+}
+
 public sealed partial class ProfileOptionViewModel(BotProfile profile, bool isSelected) : ObservableObject
 {
     public BotProfile Profile { get; } = profile;
@@ -191,7 +204,10 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     partial void OnIsDeletingSessionChanged(bool value) => OnPropertyChanged(nameof(DeleteSessionActionLabel));
     partial void OnDeleteSessionErrorChanged(string? value) => OnPropertyChanged(nameof(HasDeleteSessionError));
     [ObservableProperty] private bool _isRunningTurn;
+    [ObservableProperty] private bool _isUploadingAttachments;
     [ObservableProperty] private string _composerText = "";
+    public ObservableCollection<PendingAttachmentItem> PendingAttachments { get; } = [];
+    public bool HasPendingAttachments => PendingAttachments.Count > 0;
     [ObservableProperty] private string _currentModelLabel = "default";
     [ObservableProperty] private double _contextPercent;
     [ObservableProperty] private int _contextUsed;
@@ -416,6 +432,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             OnPropertyChanged(nameof(HasSavedDashboards));
             OnPropertyChanged(nameof(HasNoSavedDashboards));
         };
+        PendingAttachments.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasPendingAttachments));
 
         var startupDashboard = SessionCatalogHelper.ResolveStartupDashboard(SavedDashboards, _settings.ActiveDashboardId);
         if (startupDashboard is not null)
@@ -870,6 +887,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         _serverMaintenanceCts?.Cancel();
 
         ClearActiveTranscriptState();
+        PendingAttachments.Clear();
+        IsUploadingAttachments = false;
         _openedSession = null;
         _backgroundNoticeTimer.Stop();
         BackgroundNoticeSession = null;
@@ -1483,11 +1502,96 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     }
 
     [RelayCommand]
+    private void RemovePendingAttachment(PendingAttachmentItem? item)
+    {
+        if (item is not null) PendingAttachments.Remove(item);
+    }
+
+    public void StageLocalFile(string filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath)) return;
+        try
+        {
+            var info = new FileInfo(filePath);
+            if (!info.Exists)
+            {
+                StatusBanner = AppLocalization.T($"File not found: {filePath}", $"找不到文件：{filePath}");
+                return;
+            }
+            if (info.Length <= 0)
+            {
+                StatusBanner = AppLocalization.T($"File is empty: {info.Name}", $"文件为空：{info.Name}");
+                return;
+            }
+            if (info.Length > AttachmentUploadHelper.MaxAttachmentBytes)
+            {
+                StatusBanner = AppLocalization.T(
+                    $"File exceeds 25 MB limit: {info.Name}",
+                    $"文件超过 25 MB 限制：{info.Name}");
+                return;
+            }
+
+            var bytes = File.ReadAllBytes(filePath);
+            var mime = AttachmentUploadHelper.GuessMimeType(info.Name);
+            var kind = UserAttachmentExtractor.ClassifyKind(info.Name);
+            StageMemoryAttachment(info.Name, bytes, mime, kind);
+        }
+        catch (Exception ex)
+        {
+            StatusBanner = AppLocalization.T($"Could not read file: {ex.Message}", $"读取文件失败：{ex.Message}");
+        }
+    }
+
+    public void StageMemoryAttachment(string fileName, byte[] bytes, string? mimeType = null, AttachmentKind? kind = null)
+    {
+        if (bytes is not { Length: > 0 }) return;
+        if (bytes.Length > AttachmentUploadHelper.MaxAttachmentBytes)
+        {
+            StatusBanner = AppLocalization.T(
+                $"Attachment exceeds 25 MB limit: {fileName}",
+                $"附件超过 25 MB 限制：{fileName}");
+            return;
+        }
+
+        var safeName = string.IsNullOrWhiteSpace(fileName) ? "attachment.bin" : Path.GetFileName(fileName);
+        var resolvedMime = string.IsNullOrWhiteSpace(mimeType)
+            ? AttachmentUploadHelper.GuessMimeType(safeName)
+            : mimeType;
+        var resolvedKind = kind ?? (resolvedMime.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
+            ? AttachmentKind.Image
+            : UserAttachmentExtractor.ClassifyKind(safeName));
+
+        Bitmap? thumb = null;
+        if (resolvedKind == AttachmentKind.Image)
+        {
+            try
+            {
+                using var ms = new MemoryStream(bytes);
+                thumb = Bitmap.DecodeToWidth(ms, 72);
+            }
+            catch
+            {
+                // Some formats (e.g. SVG) cannot decode as a raster Bitmap; fall back to file badge.
+            }
+        }
+
+        PendingAttachments.Add(new PendingAttachmentItem
+        {
+            Name = safeName,
+            Bytes = bytes,
+            MimeType = resolvedMime,
+            Kind = resolvedKind,
+            Thumbnail = thumb
+        });
+    }
+
+    [RelayCommand]
     private async Task SendOrQueueAsync()
     {
-        if (_wsClient is null) return;
+        if (_wsClient is null || IsUploadingAttachments) return;
         var text = ComposerText.Trim();
-        if (string.IsNullOrEmpty(text)) return;
+        var hasAttachments = PendingAttachments.Count > 0;
+        if (string.IsNullOrEmpty(text) && !hasAttachments) return;
 
         if (ActiveSession is null)
         {
@@ -1504,25 +1608,20 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             }
         }
 
+        var stagedToSend = PendingAttachments.ToList();
+        PendingAttachments.Clear();
         ComposerText = "";
         _cache.SaveDraft(DraftKey(ActiveSession.Id), "");
-
-        var msgId = Guid.NewGuid().ToString("N");
-        var (cleanText, optimisticAttachments) = UserAttachmentExtractor.Extract(text, msgId);
-        ActiveMessages.Add(new MessageItemViewModel(new ChatMessage
-        {
-            Id = msgId,
-            Role = MessageRole.User,
-            Content = cleanText,
-            Attachments = optimisticAttachments,
-            Timestamp = DateTimeOffset.Now.ToString("HH:mm")
-        }));
-        RecomputeTranscriptPresentation(ActiveMessages, IsRunningTurn);
-        TranscriptScrollRequested?.Invoke(true);
 
         var profile = ActiveSession.Profile ?? SelectedProfile?.Name;
         var targetId = _activeRuntimeSessionId ?? ActiveSession.RuntimeSessionId ?? ActiveSession.Id;
         var queued = IsRunningTurn;
+
+        var msgId = Guid.NewGuid().ToString("N");
+        var (cleanText, inlineAttachments) = UserAttachmentExtractor.Extract(text, msgId);
+        List<string> fileReferences = [];
+        List<string> stagedImagePaths = [];
+        var bubbleAttachments = new List<Attachment>(inlineAttachments);
 
         try
         {
@@ -1533,8 +1632,44 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 queued = IsRunningTurn;
             }
 
-            var outcome = await _wsClient.SubmitPromptAsync(targetId, text, profile, queued: queued);
-            AppDiagnostics.Log("SEND", $"Submitted session={targetId}, queued={queued}, outcome={outcome}");
+            if (stagedToSend.Count > 0)
+            {
+                IsUploadingAttachments = true;
+                try
+                {
+                    var uploaded = await UploadPendingAttachmentsAsync(targetId, profile, stagedToSend, msgId);
+                    fileReferences = uploaded.FileReferences;
+                    stagedImagePaths = uploaded.StagedImagePaths;
+                    bubbleAttachments.AddRange(uploaded.BubbleAttachments);
+                }
+                catch (Exception uploadEx)
+                {
+                    await DetachStagedImagesAsync(targetId, profile, stagedImagePaths);
+                    RestoreUnsentDraft(text, stagedToSend);
+                    StatusBanner = AppLocalization.T($"Attachment upload failed: {uploadEx.Message}", $"附件上传失败：{uploadEx.Message}");
+                    AppDiagnostics.Log("UPLOAD_ERR", uploadEx.Message);
+                    return;
+                }
+                finally
+                {
+                    IsUploadingAttachments = false;
+                }
+            }
+
+            ActiveMessages.Add(new MessageItemViewModel(new ChatMessage
+            {
+                Id = msgId,
+                Role = MessageRole.User,
+                Content = cleanText,
+                Attachments = bubbleAttachments.Count > 0 ? bubbleAttachments : null,
+                Timestamp = DateTimeOffset.Now.ToString("HH:mm")
+            }));
+            RecomputeTranscriptPresentation(ActiveMessages, IsRunningTurn);
+            TranscriptScrollRequested?.Invoke(true);
+
+            var outboundPrompt = AttachmentUploadHelper.BuildPromptWithFileReferences(text, fileReferences);
+            var outcome = await _wsClient.SubmitPromptAsync(targetId, outboundPrompt, profile, queued: queued);
+            AppDiagnostics.Log("SEND", $"Submitted session={targetId}, queued={queued}, outcome={outcome}, files={stagedToSend.Count}");
             _lastActiveStreamEventAt = DateTimeOffset.UtcNow;
             if (!queued) IsRunningTurn = true;
             _openedSession = ActiveSession;
@@ -1546,15 +1681,45 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         }
         catch (RpcException rpcEx) when (rpcEx.Message.Contains("session not found", StringComparison.OrdinalIgnoreCase))
         {
+            await DetachStagedImagesAsync(targetId, profile, stagedImagePaths);
             // Re-resume once to acquire a fresh live runtime session_id and retry
             try
             {
                 var resumed = await _wsClient.OpenSessionAsync(ActiveSession.StoredSessionId ?? ActiveSession.Id, profile);
                 _activeRuntimeSessionId = resumed.SessionId;
                 ActiveSession.RuntimeSessionId = resumed.SessionId;
-                await _wsClient.SubmitPromptAsync(resumed.SessionId, text, profile, queued: false);
+
+                var retryPrompt = text;
+                List<string> retryStagedImages = [];
+                if (stagedToSend.Count > 0)
+                {
+                    IsUploadingAttachments = true;
+                    try
+                    {
+                        var reuploaded = await UploadPendingAttachmentsAsync(resumed.SessionId, profile, stagedToSend, msgId);
+                        retryStagedImages = reuploaded.StagedImagePaths;
+                        retryPrompt = AttachmentUploadHelper.BuildPromptWithFileReferences(text, reuploaded.FileReferences);
+                    }
+                    finally
+                    {
+                        IsUploadingAttachments = false;
+                    }
+                }
+
+                try
+                {
+                    await _wsClient.SubmitPromptAsync(resumed.SessionId, retryPrompt, profile, queued: false);
+                }
+                catch
+                {
+                    await DetachStagedImagesAsync(resumed.SessionId, profile, retryStagedImages);
+                    throw;
+                }
+
                 _lastActiveStreamEventAt = DateTimeOffset.UtcNow;
                 IsRunningTurn = true;
+                _openedSession = ActiveSession;
+                ActiveSession.IsActive = true;
                 StatusBanner = $"Connected · {_activeDashboard?.Label}";
                 AppDiagnostics.Log("SEND", $"Retried after session.resume -> {resumed.SessionId}");
             }
@@ -1568,10 +1733,97 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         }
         catch (Exception ex)
         {
+            await DetachStagedImagesAsync(targetId, profile, stagedImagePaths);
             if (!queued) IsRunningTurn = false;
             StatusBanner = $"Send failed: {ex.Message}";
             AppDiagnostics.Log("SEND_ERR", ex.Message);
             AppendSystemNotice($"Send failed: {ex.Message}");
+        }
+    }
+
+    private async Task<(List<string> FileReferences, List<string> StagedImagePaths, List<Attachment> BubbleAttachments)>
+        UploadPendingAttachmentsAsync(
+            string sessionId,
+            string? profile,
+            IReadOnlyList<PendingAttachmentItem> items,
+            string messageId)
+    {
+        if (_wsClient is null) throw new InvalidOperationException("WebSocket is not connected.");
+
+        var fileReferences = new List<string>();
+        var stagedImagePaths = new List<string>();
+        var bubbleAttachments = new List<Attachment>();
+
+        for (var i = 0; i < items.Count; i++)
+        {
+            var item = items[i];
+            var base64 = Convert.ToBase64String(item.Bytes);
+            var dataUrl = $"data:{item.MimeType};base64,{base64}";
+
+            if (item.Kind == AttachmentKind.Image)
+            {
+                try
+                {
+                    var stagedPath = await _wsClient.AttachImageBytesAsync(sessionId, base64, item.Name, profile);
+                    if (!string.IsNullOrWhiteSpace(stagedPath)) stagedImagePaths.Add(stagedPath);
+                    bubbleAttachments.Add(new Attachment(
+                        Id: $"{messageId}-up-img-{i}",
+                        Name: item.Name,
+                        Uri: dataUrl,
+                        MimeType: item.MimeType,
+                        Kind: AttachmentKind.Image));
+                    continue;
+                }
+                catch (Exception ex) when (AttachmentUploadHelper.IsImageAttachRefusal(ex))
+                {
+                    // Fall back to staging as a generic file if Hermes refuses this image format/size.
+                }
+            }
+
+            var (reference, resolvedPath) = await _wsClient.AttachFileAsync(sessionId, dataUrl, item.Name, "", profile);
+            if (!string.IsNullOrWhiteSpace(reference))
+            {
+                fileReferences.Add(reference);
+            }
+            bubbleAttachments.Add(new Attachment(
+                Id: $"{messageId}-up-file-{i}",
+                Name: item.Name,
+                Uri: resolvedPath ?? dataUrl,
+                MimeType: item.MimeType,
+                Kind: item.Kind));
+        }
+
+        return (fileReferences, stagedImagePaths, bubbleAttachments);
+    }
+
+    private async Task DetachStagedImagesAsync(string sessionId, string? profile, IReadOnlyList<string> paths)
+    {
+        if (_wsClient is null || paths.Count == 0) return;
+        foreach (var path in paths)
+        {
+            try
+            {
+                await _wsClient.DetachImageAsync(sessionId, path, profile);
+            }
+            catch
+            {
+                // Best-effort cleanup
+            }
+        }
+    }
+
+    private void RestoreUnsentDraft(string text, IReadOnlyList<PendingAttachmentItem> items)
+    {
+        if (string.IsNullOrWhiteSpace(ComposerText) && !string.IsNullOrEmpty(text))
+        {
+            ComposerText = text;
+        }
+        foreach (var item in items)
+        {
+            if (!PendingAttachments.Contains(item))
+            {
+                PendingAttachments.Add(item);
+            }
         }
     }
 

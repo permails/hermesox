@@ -30,6 +30,9 @@ public sealed class HermesWsClient : IAsyncDisposable
     private readonly ConcurrentDictionary<string, (string SessionId, int Generation)> _authorityPrompts = new();
     private readonly ConcurrentDictionary<string, string> _serverClarifyRequests = new();
     private readonly ConcurrentDictionary<string, int> _sessionGenerations = new();
+    private readonly ConcurrentDictionary<string, List<StagedImageAttachment>> _authorityStagedImages = new();
+
+    public sealed record StagedImageAttachment(string Path, string MimeType);
 
     public bool IsConnected => _socket?.State == WebSocketState.Open;
     public bool SpeaksSessionAuthority { get; private set; }
@@ -121,6 +124,7 @@ public sealed class HermesWsClient : IAsyncDisposable
         _authorityPrompts.Clear();
         _serverClarifyRequests.Clear();
         _sessionGenerations.Clear();
+        _authorityStagedImages.Clear();
         SpeaksSessionAuthority = false;
         SendsChangeEvents = false;
     }
@@ -267,14 +271,112 @@ public sealed class HermesWsClient : IAsyncDisposable
         if (SpeaksSessionAuthority)
         {
             p["submission_id"] = Guid.NewGuid().ToString("D");
+            if (_authorityStagedImages.TryRemove(sessionId, out var staged))
+            {
+                lock (staged)
+                {
+                    if (staged.Count > 0)
+                    {
+                        p["attachments"] = staged.Select(a => new { path = a.Path, mime = a.MimeType }).ToArray();
+                    }
+                }
+            }
         }
 
-        var res = await RpcAsync("prompt.submit", p, ct: ct);
+        var res = await RpcAsync("prompt.submit", p, timeout: TimeSpan.FromSeconds(180), ct: ct);
         var gen = GetInt(res, "execution_generation");
         if (gen.HasValue) _sessionGenerations[sessionId] = gen.Value;
 
         var status = GetString(res, "status")?.ToLowerInvariant();
         return status == "queued" ? PromptSubmissionOutcome.Queued : PromptSubmissionOutcome.Accepted;
+    }
+
+    public async Task<string?> AttachImageBytesAsync(
+        string sessionId,
+        string base64,
+        string filename,
+        string? profile = null,
+        CancellationToken ct = default)
+    {
+        var p = new Dictionary<string, object?>
+        {
+            ["session_id"] = sessionId,
+            ["content_base64"] = base64,
+            ["filename"] = filename
+        };
+        if (!string.IsNullOrWhiteSpace(profile)) p["profile"] = profile;
+
+        var res = await RpcAsync(
+            "image.attach_bytes",
+            p,
+            timeout: AttachmentUploadHelper.UploadTimeoutForPayloadLength(base64.Length),
+            ct: ct);
+
+        var path = GetString(res, "path");
+        var mime = GetString(res, "mime");
+        if (SpeaksSessionAuthority && !string.IsNullOrWhiteSpace(path) && !string.IsNullOrWhiteSpace(mime))
+        {
+            var list = _authorityStagedImages.GetOrAdd(sessionId, _ => []);
+            lock (list)
+            {
+                list.Add(new StagedImageAttachment(path, mime));
+            }
+        }
+        return path;
+    }
+
+    public async Task DetachImageAsync(
+        string sessionId,
+        string path,
+        string? profile = null,
+        CancellationToken ct = default)
+    {
+        if (_authorityStagedImages.TryGetValue(sessionId, out var list))
+        {
+            lock (list)
+            {
+                list.RemoveAll(a => string.Equals(a.Path, path, StringComparison.Ordinal));
+            }
+        }
+        if (SpeaksSessionAuthority) return;
+
+        var p = new Dictionary<string, object?>
+        {
+            ["session_id"] = sessionId,
+            ["path"] = path
+        };
+        if (!string.IsNullOrWhiteSpace(profile)) p["profile"] = profile;
+        await RpcAsync("image.detach", p, ct: ct);
+    }
+
+    public async Task<(string? Reference, string? Path)> AttachFileAsync(
+        string sessionId,
+        string dataUrl,
+        string name,
+        string path = "",
+        string? profile = null,
+        CancellationToken ct = default)
+    {
+        var p = new Dictionary<string, object?>
+        {
+            ["session_id"] = sessionId,
+            ["data_url"] = dataUrl,
+            ["name"] = name,
+            ["path"] = path
+        };
+        if (!string.IsNullOrWhiteSpace(profile)) p["profile"] = profile;
+
+        var res = await RpcAsync(
+            "file.attach",
+            p,
+            timeout: AttachmentUploadHelper.UploadTimeoutForPayloadLength(dataUrl.Length),
+            ct: ct);
+
+        var reference = AttachmentUploadHelper.BuildFileReferenceFromRpcResult(res);
+        var resolvedPath = GetString(res, "ref_path")
+            ?? GetString(res, "path")
+            ?? AttachmentUploadHelper.ExtractPathFromFileReference(reference);
+        return (reference, resolvedPath);
     }
 
     public async Task SteerAsync(string sessionId, string text, string? profile = null, CancellationToken ct = default)

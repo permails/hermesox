@@ -86,6 +86,9 @@ public sealed class LocStrings : INotifyPropertyChanged
     public string Steer => L("Steer", "纠偏");
     public string Queue => L("Queue", "排队");
     public string Send => L("Send", "发送");
+    public string AttachFilesTip => L("Attach image or file (drag & drop or Ctrl+V image also supported)", "上传图片或文件（支持拖拽文件或直接 Ctrl+V 粘贴图片）");
+    public string UploadingAttachments => L("Uploading attachments...", "正在上传附件...");
+    public string RemoveAttachmentTip => L("Remove attachment", "移除附件");
 
     // Beside Chat
     public string BesideChatFallback => L("Beside Chat", "并行对话");
