@@ -60,6 +60,9 @@ public sealed class LocStrings : INotifyPropertyChanged
     public string Deleting => L("Deleting...", "正在删除...");
     public string ConfirmDeleteSessionPrefix => L("Delete conversation ", "确认删除会话「");
     public string ConfirmDeleteSessionSuffix => L("?", "」？");
+    public string DeleteSessionWarning => L(
+        "This conversation and all its messages will be permanently deleted and cannot be undone.",
+        "删除后将永久移除该会话及其所有消息，无法恢复。");
     public string StopBeforeDeleteSession => L(
         "Stop the active response before deleting this session.",
         "请先停止当前正在生成的回复，再删除该会话。");

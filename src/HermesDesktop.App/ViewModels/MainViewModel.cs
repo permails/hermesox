@@ -190,6 +190,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
     public bool IsConfirmingDeleteSession => PendingDeleteSession is not null;
     public bool HasDeleteSessionError => !string.IsNullOrWhiteSpace(DeleteSessionError);
+    public bool CanConfirmOrCancelDeleteSession => !IsDeletingSession;
     public string DeleteSessionActionLabel => IsDeletingSession ? Loc.Deleting : Loc.YesDelete;
     public string PendingDeleteSessionPrompt => PendingDeleteSession is null
         ? ""
@@ -199,9 +200,14 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     {
         OnPropertyChanged(nameof(IsConfirmingDeleteSession));
         OnPropertyChanged(nameof(PendingDeleteSessionPrompt));
+        OnPropertyChanged(nameof(IsHtmlPreviewWebViewVisible));
     }
 
-    partial void OnIsDeletingSessionChanged(bool value) => OnPropertyChanged(nameof(DeleteSessionActionLabel));
+    partial void OnIsDeletingSessionChanged(bool value)
+    {
+        OnPropertyChanged(nameof(DeleteSessionActionLabel));
+        OnPropertyChanged(nameof(CanConfirmOrCancelDeleteSession));
+    }
     partial void OnDeleteSessionErrorChanged(string? value) => OnPropertyChanged(nameof(HasDeleteSessionError));
     [ObservableProperty] private bool _isRunningTurn;
     [ObservableProperty] private bool _isUploadingAttachments;
@@ -296,7 +302,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private CancellationTokenSource? _serverMaintenanceCts;
     private static readonly double[] HtmlZoomSteps = [0.50, 0.65, 0.75, 0.85, 1.00, 1.15, 1.30, 1.50];
 
-    public bool IsHtmlPreviewWebViewVisible => IsHtmlPreviewPaneOpen && !ShowConnectOverlay && !IsPreviewModalOpen && !IsImageViewerOpen && !IsSoulEditorOpen && !IsCronEditorOpen;
+    public bool IsHtmlPreviewWebViewVisible => IsHtmlPreviewPaneOpen && !ShowConnectOverlay && !IsPreviewModalOpen && !IsImageViewerOpen && !IsSoulEditorOpen && !IsCronEditorOpen && !IsConfirmingDeleteSession;
     public string HtmlPreviewZoomLabel => $"{Math.Round(HtmlPreviewZoom * 100):0}%";
     public LocStrings Loc => LocStrings.Instance;
     public bool IsSystemLanguage => AppLocalization.Mode == AppLanguageMode.System;
