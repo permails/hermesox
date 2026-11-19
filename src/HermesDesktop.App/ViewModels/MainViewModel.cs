@@ -113,9 +113,11 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly StringBuilder _streamContentBuffer = new();
     private readonly StringBuilder _streamReasoningBuffer = new();
     private readonly DispatcherTimer _streamFlushTimer;
+    private readonly DispatcherTimer _backgroundNoticeTimer;
     private readonly Dictionary<string, MessageItemViewModel> _activeTools = new(StringComparer.Ordinal);
     private string? _activeRuntimeSessionId;
     private string? _streamBufferSessionId;
+    private SessionSummary? _openedSession;
     private bool _suppressSelectionOpen;
     private bool _suppressProfileRefresh;
     private int _sessionsRefreshGeneration;
@@ -166,6 +168,12 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty] private bool _isDeletingSession;
     [ObservableProperty] private string? _deleteSessionError;
     [ObservableProperty] private bool _isLoadingMessages;
+    [ObservableProperty] private SessionSummary? _backgroundNoticeSession;
+    [ObservableProperty] private string _backgroundNoticeTitle = "";
+    [ObservableProperty] private string _backgroundNoticeDetail = "";
+
+    public bool IsBackgroundNoticeVisible => BackgroundNoticeSession is not null;
+    partial void OnBackgroundNoticeSessionChanged(SessionSummary? value) => OnPropertyChanged(nameof(IsBackgroundNoticeVisible));
 
     public bool IsConfirmingDeleteSession => PendingDeleteSession is not null;
     public bool HasDeleteSessionError => !string.IsNullOrWhiteSpace(DeleteSessionError);
@@ -378,6 +386,12 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         _tabLayout = new V2TabLayout(_settings.V2TabTokens);
         _streamFlushTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(90) };
         _streamFlushTimer.Tick += (_, _) => FlushStreamingDeltas();
+        _backgroundNoticeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(8) };
+        _backgroundNoticeTimer.Tick += (_, _) =>
+        {
+            _backgroundNoticeTimer.Stop();
+            BackgroundNoticeSession = null;
+        };
 
         SelectedTab = _tabLayout.Shown.Contains(V2Tab.Chats)
             ? V2Tab.Chats
@@ -855,6 +869,9 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         _serverMaintenanceCts?.Cancel();
 
         ClearActiveTranscriptState();
+        _openedSession = null;
+        _backgroundNoticeTimer.Stop();
+        BackgroundNoticeSession = null;
         PendingDeleteSession = null;
         DeleteSessionError = null;
         IsDeletingSession = false;
@@ -1010,6 +1027,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
             var previousActive = ActiveSession;
             var previousRuntimeId = _activeRuntimeSessionId;
+            var previousAll = _allSessions.ToList();
 
             _allSessions.Clear();
             foreach (var s in SessionCatalogHelper.DeduplicateSessions(fetched))
@@ -1034,6 +1052,13 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 {
                     _allSessions.Insert(0, previousActive);
                 }
+            }
+
+            var backgroundTransitions = SessionCatalogHelper.CarryOverBackgroundStatus(
+                previousAll, _allSessions, previousActive, IsRunningTurn);
+            foreach (var (bgSession, newState) in backgroundTransitions)
+            {
+                ShowBackgroundTaskNotification(bgSession, newState);
             }
 
             ApplySessionFilter(previousActive, previousRuntimeId);
@@ -1096,7 +1121,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private static bool SessionsMatch(SessionSummary candidate, SessionSummary target, string? targetRuntimeId) =>
+    private static bool SessionsMatch(SessionSummary candidate, SessionSummary target, string? targetRuntimeId = null) =>
         SessionCatalogHelper.SessionsMatch(candidate, target, targetRuntimeId);
 
     private async Task SelectAndOpenSessionAsync(SessionSummary session)
@@ -1155,6 +1180,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 _allSessions.Insert(0, summary);
             }
 
+            MarkOutgoingSessionRunningIfBusy(summary);
+            _openedSession = summary;
             Interlocked.Increment(ref _openSessionGeneration);
             ClearActiveTranscriptState(created.SessionId);
             ApplySessionFilter(summary, created.SessionId);
@@ -1175,6 +1202,16 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private async Task OpenSessionAsync(SessionSummary session)
     {
         if (_wsClient is null || _restClient is null) return;
+        MarkOutgoingSessionRunningIfBusy(session);
+        _openedSession = session;
+        session.TaskStatus = BackgroundTaskState.None;
+        session.IsUnread = false;
+        session.BackgroundStatusDetail = null;
+        if (BackgroundNoticeSession is not null && SessionsMatch(BackgroundNoticeSession, session))
+        {
+            DismissBackgroundNotice();
+        }
+
         var openGen = Interlocked.Increment(ref _openSessionGeneration);
         IsLoadingMessages = true;
         // Clear previous runtime session ID immediately so in-flight stream events
@@ -1201,6 +1238,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             AppDiagnostics.Log("SESSION", $"Opened key={resumeKey} -> runtime={resume.SessionId}, stored={resume.StoredSessionId}, running={resume.IsRunning}");
 
             IsRunningTurn = resume.IsRunning;
+            session.IsActive = resume.IsRunning;
             CurrentModelLabel = string.IsNullOrWhiteSpace(resume.Model)
                 ? (string.IsNullOrWhiteSpace(session.Model) ? "default" : session.Model)
                 : resume.Model;
@@ -1309,6 +1347,11 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 IsBesideVisible = false;
             }
 
+            if (BackgroundNoticeSession is not null && SessionsMatch(BackgroundNoticeSession, target, deletedRuntime))
+            {
+                DismissBackgroundNotice();
+            }
+
             var deletedActive = ActiveSession is not null && SessionsMatch(target, ActiveSession, _activeRuntimeSessionId);
             PendingDeleteSession = null;
             DeleteSessionError = null;
@@ -1317,6 +1360,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             {
                 Interlocked.Increment(ref _openSessionGeneration);
                 ClearActiveTranscriptState();
+                _openedSession = null;
                 ActiveSession = null;
                 ComposerText = "";
             }
@@ -1492,6 +1536,11 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             AppDiagnostics.Log("SEND", $"Submitted session={targetId}, queued={queued}, outcome={outcome}");
             _lastActiveStreamEventAt = DateTimeOffset.UtcNow;
             if (!queued) IsRunningTurn = true;
+            _openedSession = ActiveSession;
+            ActiveSession.IsActive = true;
+            ActiveSession.TaskStatus = BackgroundTaskState.None;
+            ActiveSession.IsUnread = false;
+            ActiveSession.LastActivityAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             StatusBanner = $"Connected · {_activeDashboard?.Label}";
         }
         catch (RpcException rpcEx) when (rpcEx.Message.Contains("session not found", StringComparison.OrdinalIgnoreCase))
@@ -2791,6 +2840,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             foreach (var t in VisibleTabs) t.RefreshLocalization();
             foreach (var t in AllConfigurableTabs) t.RefreshLocalization();
             foreach (var p in ProfileChips) p.RefreshLocalization();
+            foreach (var s in _allSessions) s.RefreshLocalization();
             foreach (var m in ActiveMessages) m.RefreshLocalization();
             foreach (var m in BesideMessages) m.RefreshLocalization();
             RecomputeTranscriptPresentation(ActiveMessages, IsRunningTurn);
@@ -3003,10 +3053,18 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         }
         if (!isMain)
         {
+            var (bgSession, notificationState) = SessionCatalogHelper.UpdateBackgroundSessionForEvent(_allSessions, ev);
             if (ev is ApprovalRequestEvent or ClarifyRequestEvent)
             {
                 NeedsYouCount++;
-                _notifications.ShowNeedsAttention("Hermes", "A background session requires your approval or input.");
+                if (bgSession is null)
+                {
+                    _notifications.ShowNeedsAttention("Hermes", "A background session requires your approval or input.");
+                }
+            }
+            if (bgSession is not null && notificationState is BackgroundTaskState state)
+            {
+                ShowBackgroundTaskNotification(bgSession, state);
             }
             return;
         }
@@ -3017,6 +3075,15 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         {
             case SessionBusyEvent busy:
                 IsRunningTurn = busy.Busy;
+                if (ActiveSession is not null)
+                {
+                    ActiveSession.IsActive = busy.Busy;
+                    if (!busy.Busy)
+                    {
+                        ActiveSession.TaskStatus = BackgroundTaskState.None;
+                        ActiveSession.IsUnread = false;
+                    }
+                }
                 if (!busy.Busy)
                 {
                     FlushStreamingDeltas();
@@ -3040,9 +3107,111 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 if (!string.IsNullOrWhiteSpace(model.Model)) CurrentModelLabel = model.Model;
                 break;
             default:
+                if (ev is MessageCompleteEvent or MessageErrorEvent or MessageInterruptedEvent && ActiveSession is not null)
+                {
+                    ActiveSession.IsActive = false;
+                    ActiveSession.TaskStatus = BackgroundTaskState.None;
+                    ActiveSession.IsUnread = false;
+                }
                 ApplyEventToTranscript(ActiveMessages, ev, trackTools: true);
                 break;
         }
+    }
+
+    private void MarkOutgoingSessionRunningIfBusy(SessionSummary? nextTarget)
+    {
+        var outgoing = _openedSession;
+        if (outgoing is not null
+            && (nextTarget is null || !SessionsMatch(outgoing, nextTarget))
+            && (IsRunningTurn || outgoing.IsActive))
+        {
+            outgoing.IsActive = true;
+            outgoing.TaskStatus = BackgroundTaskState.Running;
+        }
+    }
+
+    private void ShowBackgroundTaskNotification(SessionSummary session, BackgroundTaskState state)
+    {
+        _backgroundNoticeTimer.Stop();
+        BackgroundNoticeSession = session;
+
+        switch (state)
+        {
+            case BackgroundTaskState.NeedsAttention:
+                BackgroundNoticeTitle = AppLocalization.T(
+                    $"Needs your input · {session.Title}",
+                    $"后台会话等待确认 · {session.Title}");
+                BackgroundNoticeDetail = !string.IsNullOrWhiteSpace(session.BackgroundStatusDetail)
+                    ? session.BackgroundStatusDetail!
+                    : AppLocalization.T(
+                        "A background task is waiting for approval or reply.",
+                        "该会话正在等待你的确认或补充信息。");
+                _notifications.ShowNeedsAttention(session.Title, BackgroundNoticeDetail);
+                return;
+
+            case BackgroundTaskState.Failed:
+                BackgroundNoticeTitle = AppLocalization.T(
+                    $"Background task failed · {session.Title}",
+                    $"后台任务出错 · {session.Title}");
+                BackgroundNoticeDetail = !string.IsNullOrWhiteSpace(session.BackgroundStatusDetail)
+                    ? session.BackgroundStatusDetail!
+                    : AppLocalization.T("Click View to inspect the error.", "点击「查看」切回该会话查看详情。");
+                _notifications.ShowInfo(BackgroundNoticeTitle, BackgroundNoticeDetail);
+                _backgroundNoticeTimer.Start();
+                return;
+
+            case BackgroundTaskState.Completed:
+            default:
+                BackgroundNoticeTitle = AppLocalization.T(
+                    $"Background task done · {session.Title}",
+                    $"后台任务已完成 · {session.Title}");
+                BackgroundNoticeDetail = AppLocalization.T(
+                    "Click View to switch back to this chat.",
+                    "点击「查看」可切回该会话查看结果。");
+                _notifications.ShowInfo(BackgroundNoticeTitle, BackgroundNoticeDetail);
+                _backgroundNoticeTimer.Start();
+                return;
+        }
+    }
+
+    [RelayCommand]
+    private void DismissBackgroundNotice()
+    {
+        _backgroundNoticeTimer.Stop();
+        BackgroundNoticeSession = null;
+    }
+
+    [RelayCommand]
+    private async Task OpenBackgroundNoticeSessionAsync()
+    {
+        var target = BackgroundNoticeSession;
+        DismissBackgroundNotice();
+        if (target is null) return;
+
+        if (!ShowAllProfiles
+            && !string.IsNullOrWhiteSpace(target.Profile)
+            && !string.Equals(SelectedProfile?.Name, target.Profile, StringComparison.OrdinalIgnoreCase))
+        {
+            var chip = ProfileChips.FirstOrDefault(p =>
+                string.Equals(p.Name, target.Profile, StringComparison.OrdinalIgnoreCase));
+            if (chip is not null)
+            {
+                _suppressProfileRefresh = true;
+                try
+                {
+                    SelectedProfile = chip.Profile;
+                }
+                finally
+                {
+                    _suppressProfileRefresh = false;
+                }
+                await RefreshSessionsAsync();
+                target = _allSessions.FirstOrDefault(s => SessionsMatch(s, target)) ?? target;
+            }
+        }
+
+        SelectedTab = V2Tab.Chats;
+        await SelectAndOpenSessionAsync(target);
     }
 
     private void FlushStreamingDeltas()

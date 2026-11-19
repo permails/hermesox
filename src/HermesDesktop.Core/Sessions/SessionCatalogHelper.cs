@@ -1,4 +1,5 @@
 using HermesDesktop.Core.Models;
+using HermesDesktop.Core.Rpc;
 
 namespace HermesDesktop.Core.Sessions;
 
@@ -169,6 +170,169 @@ public static class SessionCatalogHelper
             updated = true;
         }
         return updated;
+    }
+
+    public static IReadOnlyList<(SessionSummary Session, BackgroundTaskState NewState)> CarryOverBackgroundStatus(
+        IEnumerable<SessionSummary> previousSessions,
+        IEnumerable<SessionSummary> nextSessions,
+        SessionSummary? activeSession,
+        bool isActiveTurnRunning)
+    {
+        var prevList = previousSessions.ToList();
+        var transitions = new List<(SessionSummary, BackgroundTaskState)>();
+
+        foreach (var next in nextSessions)
+        {
+            if (activeSession is not null && SessionsMatch(next, activeSession))
+            {
+                next.IsActive = isActiveTurnRunning || next.IsActive;
+                next.IsUnread = false;
+                next.TaskStatus = BackgroundTaskState.None;
+                next.BackgroundStatusDetail = null;
+                continue;
+            }
+
+            var prev = prevList.FirstOrDefault(p => SessionsMatch(p, next));
+            if (next.IsActive)
+            {
+                next.TaskStatus = BackgroundTaskState.Running;
+                if (prev is not null && string.IsNullOrWhiteSpace(next.BackgroundStatusDetail))
+                {
+                    next.BackgroundStatusDetail = prev.BackgroundStatusDetail;
+                }
+                continue;
+            }
+
+            if (prev is not null)
+            {
+                if (prev.TaskStatus == BackgroundTaskState.Running || prev.IsActive)
+                {
+                    next.TaskStatus = BackgroundTaskState.Completed;
+                    next.IsUnread = true;
+                    transitions.Add((next, BackgroundTaskState.Completed));
+                    continue;
+                }
+
+                if (prev.TaskStatus is BackgroundTaskState.Completed or BackgroundTaskState.NeedsAttention or BackgroundTaskState.Failed)
+                {
+                    next.TaskStatus = prev.TaskStatus;
+                    next.BackgroundStatusDetail = prev.BackgroundStatusDetail;
+                    next.IsUnread = true;
+                    continue;
+                }
+            }
+
+            if (next.IsUnread == true)
+            {
+                next.TaskStatus = BackgroundTaskState.Completed;
+            }
+        }
+
+        return transitions;
+    }
+
+    public static (SessionSummary? Session, BackgroundTaskState? NotificationState) UpdateBackgroundSessionForEvent(
+        IEnumerable<SessionSummary> sessions,
+        StreamEvent ev)
+    {
+        if (string.IsNullOrWhiteSpace(ev.SessionId)) return (null, null);
+
+        var matched = sessions.FirstOrDefault(s => CollectSessionIds(s).Contains(ev.SessionId));
+        if (matched is null) return (null, null);
+
+        switch (ev)
+        {
+            case ToolStartEvent tool:
+                matched.IsActive = true;
+                if (matched.TaskStatus != BackgroundTaskState.NeedsAttention)
+                {
+                    matched.TaskStatus = BackgroundTaskState.Running;
+                }
+                matched.BackgroundStatusDetail = string.IsNullOrWhiteSpace(tool.ToolName) ? null : tool.ToolName;
+                return (matched, null);
+
+            case MessageStartEvent:
+            case MessageDeltaEvent:
+            case ReasoningDeltaEvent:
+            case ToolCompleteEvent:
+            case StatusUpdateEvent:
+            case SessionBusyEvent { Busy: true }:
+                matched.IsActive = true;
+                if (matched.TaskStatus != BackgroundTaskState.NeedsAttention)
+                {
+                    matched.TaskStatus = BackgroundTaskState.Running;
+                }
+                return (matched, null);
+
+            case ApprovalRequestEvent approval:
+            {
+                var notify = matched.TaskStatus != BackgroundTaskState.NeedsAttention;
+                matched.TaskStatus = BackgroundTaskState.NeedsAttention;
+                matched.IsUnread = true;
+                matched.BackgroundStatusDetail = approval.Activity.Command;
+                return (matched, notify ? BackgroundTaskState.NeedsAttention : null);
+            }
+
+            case ClarifyRequestEvent clarify:
+            {
+                var notify = matched.TaskStatus != BackgroundTaskState.NeedsAttention;
+                matched.TaskStatus = BackgroundTaskState.NeedsAttention;
+                matched.IsUnread = true;
+                matched.BackgroundStatusDetail = clarify.Activity.Question;
+                return (matched, notify ? BackgroundTaskState.NeedsAttention : null);
+            }
+
+            case ApprovalWithdrawnEvent:
+            case ClarifyExpireEvent:
+            case InputPromptExpireEvent:
+                if (matched.TaskStatus == BackgroundTaskState.NeedsAttention)
+                {
+                    matched.TaskStatus = matched.IsActive ? BackgroundTaskState.Running : BackgroundTaskState.None;
+                    matched.BackgroundStatusDetail = null;
+                }
+                return (matched, null);
+
+            case MessageCompleteEvent:
+            {
+                var notify = matched.TaskStatus != BackgroundTaskState.Completed;
+                matched.IsActive = false;
+                matched.IsUnread = true;
+                matched.TaskStatus = BackgroundTaskState.Completed;
+                matched.BackgroundStatusDetail = null;
+                return (matched, notify ? BackgroundTaskState.Completed : null);
+            }
+
+            case SessionBusyEvent { Busy: false }:
+                if (matched.TaskStatus == BackgroundTaskState.Running || matched.IsActive)
+                {
+                    var notify = matched.TaskStatus != BackgroundTaskState.Completed;
+                    matched.IsActive = false;
+                    matched.IsUnread = true;
+                    matched.TaskStatus = BackgroundTaskState.Completed;
+                    matched.BackgroundStatusDetail = null;
+                    return (matched, notify ? BackgroundTaskState.Completed : null);
+                }
+                return (matched, null);
+
+            case MessageErrorEvent err:
+            {
+                var notify = matched.TaskStatus != BackgroundTaskState.Failed;
+                matched.IsActive = false;
+                matched.IsUnread = true;
+                matched.TaskStatus = BackgroundTaskState.Failed;
+                matched.BackgroundStatusDetail = err.Message;
+                return (matched, notify ? BackgroundTaskState.Failed : null);
+            }
+
+            case MessageInterruptedEvent:
+                matched.IsActive = false;
+                matched.TaskStatus = BackgroundTaskState.None;
+                matched.BackgroundStatusDetail = null;
+                return (matched, null);
+
+            default:
+                return (matched, null);
+        }
     }
 
     private static void AddIfNonEmpty(HashSet<string> set, string? value)

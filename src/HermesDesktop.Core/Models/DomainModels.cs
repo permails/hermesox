@@ -223,27 +223,156 @@ public sealed record ChatMessage
     public DelegateAgentActivity? DelegateAgent { get; set; }
 }
 
-public sealed record SessionSummary
+public enum BackgroundTaskState
 {
+    None,
+    Running,
+    NeedsAttention,
+    Completed,
+    Failed
+}
+
+public sealed class SessionSummary : System.ComponentModel.INotifyPropertyChanged
+{
+    private string _title = "New Chat";
+    private string _updatedLabel = "";
+    private bool _isActive;
+    private bool? _isUnread;
+    private bool? _isPinned;
+    private string? _preview;
+    private BackgroundTaskState _taskStatus = BackgroundTaskState.None;
+    private string? _backgroundStatusDetail;
+
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+
     public required string Id { get; init; }
     public string? StoredSessionId { get; set; }
     public string? RuntimeSessionId { get; set; }
     public IReadOnlyList<string> AlternateIds { get; set; } = [];
-    public string Title { get; set; } = "New Chat";
     public string Model { get; set; } = "";
-    public string UpdatedLabel { get; set; } = "";
     public double? LastActivityAt { get; set; }
     public string? Profile { get; init; }
     public SessionSource Source { get; init; } = SessionSource.Chat;
-    public bool IsActive { get; set; }
     public bool IsArchived { get; set; }
     public int? MessageCount { get; set; }
-    public bool? IsUnread { get; set; }
     public double? ReadWatermark { get; init; }
-    public bool? IsPinned { get; set; }
     public string? LineageRootId { get; init; }
     public string? EndReason { get; init; }
-    public string? Preview { get; set; }
+
+    public string Title
+    {
+        get => _title;
+        set { if (_title != value) { _title = value; OnPropertyChanged(nameof(Title)); } }
+    }
+
+    public string UpdatedLabel
+    {
+        get => _updatedLabel;
+        set { if (_updatedLabel != value) { _updatedLabel = value; OnPropertyChanged(nameof(UpdatedLabel)); } }
+    }
+
+    public bool IsActive
+    {
+        get => _isActive;
+        set
+        {
+            if (_isActive != value)
+            {
+                _isActive = value;
+                OnPropertyChanged(nameof(IsActive));
+                OnTaskIndicatorChanged();
+            }
+        }
+    }
+
+    public bool? IsUnread
+    {
+        get => _isUnread;
+        set
+        {
+            if (_isUnread != value)
+            {
+                _isUnread = value;
+                OnPropertyChanged(nameof(IsUnread));
+                OnTaskIndicatorChanged();
+            }
+        }
+    }
+
+    public bool? IsPinned
+    {
+        get => _isPinned;
+        set { if (_isPinned != value) { _isPinned = value; OnPropertyChanged(nameof(IsPinned)); } }
+    }
+
+    public string? Preview
+    {
+        get => _preview;
+        set { if (_preview != value) { _preview = value; OnPropertyChanged(nameof(Preview)); } }
+    }
+
+    public BackgroundTaskState TaskStatus
+    {
+        get => _taskStatus;
+        set
+        {
+            if (_taskStatus != value)
+            {
+                _taskStatus = value;
+                OnPropertyChanged(nameof(TaskStatus));
+                OnTaskIndicatorChanged();
+            }
+        }
+    }
+
+    public string? BackgroundStatusDetail
+    {
+        get => _backgroundStatusDetail;
+        set
+        {
+            if (_backgroundStatusDetail != value)
+            {
+                _backgroundStatusDetail = value;
+                OnPropertyChanged(nameof(BackgroundStatusDetail));
+                OnPropertyChanged(nameof(BackgroundStatusTooltip));
+            }
+        }
+    }
+
+    public bool ShowRunningDot => TaskStatus == BackgroundTaskState.Running;
+
+    public bool ShowAlertDot => TaskStatus is BackgroundTaskState.NeedsAttention or BackgroundTaskState.Completed or BackgroundTaskState.Failed
+        || (TaskStatus == BackgroundTaskState.None && IsUnread == true);
+
+    public bool HasBackgroundBadge => ShowRunningDot || ShowAlertDot;
+
+    public string BackgroundBadgeText => TaskStatus switch
+    {
+        BackgroundTaskState.Running => Localization.AppLocalization.T("Running", "运行中"),
+        BackgroundTaskState.NeedsAttention => Localization.AppLocalization.T("Needs you", "待确认"),
+        BackgroundTaskState.Completed => Localization.AppLocalization.T("Done", "已完成"),
+        BackgroundTaskState.Failed => Localization.AppLocalization.T("Failed", "出错"),
+        BackgroundTaskState.None when IsUnread == true => Localization.AppLocalization.T("Unread", "未读"),
+        _ => ""
+    };
+
+    public string? BackgroundStatusTooltip => string.IsNullOrWhiteSpace(BackgroundStatusDetail)
+        ? (HasBackgroundBadge ? BackgroundBadgeText : null)
+        : $"{BackgroundBadgeText}: {BackgroundStatusDetail}";
+
+    public void RefreshLocalization() => OnTaskIndicatorChanged();
+
+    private void OnTaskIndicatorChanged()
+    {
+        OnPropertyChanged(nameof(ShowRunningDot));
+        OnPropertyChanged(nameof(ShowAlertDot));
+        OnPropertyChanged(nameof(HasBackgroundBadge));
+        OnPropertyChanged(nameof(BackgroundBadgeText));
+        OnPropertyChanged(nameof(BackgroundStatusTooltip));
+    }
+
+    private void OnPropertyChanged(string propertyName) =>
+        PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(propertyName));
 }
 
 public sealed record CronJobSummary(

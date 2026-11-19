@@ -1,4 +1,5 @@
 using HermesDesktop.Core.Models;
+using HermesDesktop.Core.Rpc;
 using HermesDesktop.Core.Sessions;
 using Xunit;
 
@@ -145,5 +146,76 @@ public class SessionCatalogHelperTests
         Assert.Equal(newerId, fallbackPick?.Id);
 
         Assert.Null(SessionCatalogHelper.ResolveStartupDashboard([], olderId));
+    }
+
+    [Fact]
+    public void UpdateBackgroundSessionForEvent_TracksRunningApprovalCompletionAndFailure()
+    {
+        var bg = new SessionSummary
+        {
+            Id = "bg-stored",
+            StoredSessionId = "bg-stored",
+            RuntimeSessionId = "bg-rt",
+            Title = "Long Research"
+        };
+
+        var (_, n1) = SessionCatalogHelper.UpdateBackgroundSessionForEvent([bg], new ToolStartEvent("bg-rt", "web_search", null, "t1"));
+        Assert.Null(n1);
+        Assert.Equal(BackgroundTaskState.Running, bg.TaskStatus);
+        Assert.True(bg.ShowRunningDot);
+        Assert.False(bg.ShowAlertDot);
+        Assert.Equal("web_search", bg.BackgroundStatusDetail);
+
+        var (_, n2) = SessionCatalogHelper.UpdateBackgroundSessionForEvent(
+            [bg],
+            new ApprovalRequestEvent("bg-rt", new ApprovalActivity("req-1", "bg-rt", "rm -rf /tmp/test", "confirm", "high", [])));
+        Assert.Equal(BackgroundTaskState.NeedsAttention, n2);
+        Assert.Equal(BackgroundTaskState.NeedsAttention, bg.TaskStatus);
+        Assert.True(bg.ShowAlertDot);
+
+        var (_, n3) = SessionCatalogHelper.UpdateBackgroundSessionForEvent([bg], new MessageCompleteEvent("bg-rt", "m1", "done", null, false));
+        Assert.Equal(BackgroundTaskState.Completed, n3);
+        Assert.Equal(BackgroundTaskState.Completed, bg.TaskStatus);
+        Assert.True(bg.IsUnread);
+        Assert.True(bg.ShowAlertDot);
+
+        // A trailing SessionBusy(false) after MessageComplete must not re-fire a duplicate notification.
+        var (_, n4) = SessionCatalogHelper.UpdateBackgroundSessionForEvent([bg], new SessionBusyEvent("bg-rt", false));
+        Assert.Null(n4);
+
+        var (_, n5) = SessionCatalogHelper.UpdateBackgroundSessionForEvent([bg], new MessageErrorEvent("bg-rt", "timeout"));
+        Assert.Equal(BackgroundTaskState.Failed, n5);
+        Assert.Equal(BackgroundTaskState.Failed, bg.TaskStatus);
+        Assert.Equal("timeout", bg.BackgroundStatusDetail);
+    }
+
+    [Fact]
+    public void CarryOverBackgroundStatus_DetectsCompletionAndPreservesUnreadState()
+    {
+        var active = new SessionSummary { Id = "active-1", Title = "Current Chat", IsActive = true };
+        var prevRunning = new SessionSummary { Id = "bg-1", Title = "Task 1", IsActive = true, TaskStatus = BackgroundTaskState.Running };
+        var prevDone = new SessionSummary { Id = "bg-2", Title = "Task 2", IsUnread = true, TaskStatus = BackgroundTaskState.Completed };
+
+        var nextActive = new SessionSummary { Id = "active-1", Title = "Current Chat", IsActive = true, IsUnread = true };
+        var nextFinished = new SessionSummary { Id = "bg-1", Title = "Task 1", IsActive = false };
+        var nextStillDone = new SessionSummary { Id = "bg-2", Title = "Task 2", IsActive = false };
+
+        var transitions = SessionCatalogHelper.CarryOverBackgroundStatus(
+            [active, prevRunning, prevDone],
+            [nextActive, nextFinished, nextStillDone],
+            activeSession: nextActive,
+            isActiveTurnRunning: true);
+
+        Assert.Single(transitions);
+        Assert.Equal("bg-1", transitions[0].Session.Id);
+        Assert.Equal(BackgroundTaskState.Completed, transitions[0].NewState);
+        Assert.Equal(BackgroundTaskState.Completed, nextFinished.TaskStatus);
+        Assert.True(nextFinished.IsUnread);
+
+        Assert.Equal(BackgroundTaskState.Completed, nextStillDone.TaskStatus);
+        Assert.True(nextStillDone.IsUnread);
+
+        Assert.Equal(BackgroundTaskState.None, nextActive.TaskStatus);
+        Assert.False(nextActive.IsUnread);
     }
 }

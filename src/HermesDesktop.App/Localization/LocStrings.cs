@@ -51,6 +51,7 @@ public sealed class LocStrings : INotifyPropertyChanged
     public string SearchSessionsWatermark => L("Search sessions...", "搜索会话...");
     public string PinUnpinTip => L("Pin / Unpin", "置顶 / 取消置顶");
     public string OpenInBesideChatTip => L("Open in Beside Chat", "在右侧并行窗口打开");
+    public string ViewSessionBtn => L("View", "查看");
     public string DeleteSessionTip => L("Delete session", "删除会话");
     public string DeleteSession => L("Delete Session", "删除会话");
     public string Deleting => L("Deleting...", "正在删除...");
