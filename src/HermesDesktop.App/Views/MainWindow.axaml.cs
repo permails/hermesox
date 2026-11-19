@@ -4,6 +4,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using HermesDesktop.App.Controls;
+using HermesDesktop.App.Localization;
 using HermesDesktop.App.ViewModels;
 
 namespace HermesDesktop.App.Views;
@@ -96,5 +97,42 @@ public partial class MainWindow : Window
             DataContext = vm
         };
         win.Show();
+    }
+
+    private async void OnCopyPreviewSelectionClick(object? sender, RoutedEventArgs e)
+    {
+        if (PreviewTextBox is null) return;
+        var selected = PreviewTextBox.SelectedText;
+        var text = string.IsNullOrEmpty(selected) ? (PreviewTextBox.Text ?? "") : selected;
+        await CopyPreviewTextWithFeedbackAsync(text, CopyPreviewSelectionBtn, () => LocStrings.Instance.CopySelectionBtn);
+    }
+
+    private async void OnCopyPreviewAllClick(object? sender, RoutedEventArgs e)
+    {
+        if (PreviewTextBox is null) return;
+        await CopyPreviewTextWithFeedbackAsync(PreviewTextBox.Text ?? "", CopyPreviewAllBtn, () => LocStrings.Instance.CopyAllBtn);
+    }
+
+    private async Task CopyPreviewTextWithFeedbackAsync(string text, Button? button, Func<string> defaultLabel)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        try
+        {
+            var top = TopLevel.GetTopLevel(this);
+            if (top?.Clipboard is not null)
+            {
+                await top.Clipboard.SetTextAsync(text);
+                if (button is not null)
+                {
+                    button.Content = LocStrings.Instance.CopiedBtn;
+                    await Task.Delay(1500);
+                    button.Content = defaultLabel();
+                }
+            }
+        }
+        catch
+        {
+            // Clipboard access may fail transiently on locked desktops
+        }
     }
 }

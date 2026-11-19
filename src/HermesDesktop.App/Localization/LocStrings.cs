@@ -52,6 +52,9 @@ public sealed class LocStrings : INotifyPropertyChanged
     public string PinUnpinTip => L("Pin / Unpin", "置顶 / 取消置顶");
     public string OpenInBesideChatTip => L("Open in Beside Chat", "在右侧并行窗口打开");
     public string ViewSessionBtn => L("View", "查看");
+    public string CopySelectionBtn => L("Copy Selection", "复制所选");
+    public string CopyAllBtn => L("Copy All", "复制全部");
+    public string CopiedBtn => L("Copied ✓", "已复制 ✓");
     public string DeleteSessionTip => L("Delete session", "删除会话");
     public string DeleteSession => L("Delete Session", "删除会话");
     public string Deleting => L("Deleting...", "正在删除...");

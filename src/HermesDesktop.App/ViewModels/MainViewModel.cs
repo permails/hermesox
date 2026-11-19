@@ -212,6 +212,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     // Preview Modal (Text), In-App HTML Preview Side Pane & Image Lightbox
     [ObservableProperty] private bool _isPreviewModalOpen;
     [ObservableProperty] private string _previewTitle = "";
+    [ObservableProperty] private string _previewFilePath = "";
     [ObservableProperty] private string _previewText = "";
 
     [ObservableProperty] private bool _isImageViewerOpen;
@@ -2689,6 +2690,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 return;
             }
             PreviewTitle = Path.GetFileName(remotePath);
+            PreviewFilePath = remotePath;
             PreviewText = content;
             IsPreviewModalOpen = true;
         }

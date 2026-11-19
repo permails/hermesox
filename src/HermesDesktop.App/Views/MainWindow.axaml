@@ -977,15 +977,34 @@
 
     <!-- File / Text Preview Modal (Fluent 2 ContentDialog 8px + Smoke scrim) -->
     <Border Grid.RowSpan="3" IsVisible="{Binding IsPreviewModalOpen}" Background="{DynamicResource WinSmokeScrimBrush}">
-      <Border Classes="dialog" Width="760" MaxHeight="680" Padding="20" HorizontalAlignment="Center" VerticalAlignment="Center">
+      <Border Classes="dialog" Width="840" Height="660" MaxWidth="1040" MaxHeight="760" Padding="20" HorizontalAlignment="Center" VerticalAlignment="Center">
         <Grid RowDefinitions="Auto,*">
-          <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,12">
-            <TextBlock Grid.Column="0" Text="{Binding PreviewTitle}" FontSize="16" FontWeight="SemiBold"/>
-            <Button Grid.Column="1" Classes="subtle" Content="{Binding Loc.Close}" Command="{Binding ClosePreviewModalCommand}"/>
+          <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto,Auto" Margin="0,0,0,12">
+            <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,12,0" Spacing="2">
+              <TextBlock Text="{Binding PreviewTitle}" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+              <TextBlock Text="{Binding PreviewFilePath}" FontSize="11" Foreground="{DynamicResource WinTextTertiaryBrush}" TextTrimming="CharacterEllipsis"/>
+            </StackPanel>
+            <Button x:Name="CopyPreviewSelectionBtn" Grid.Column="1" Classes="subtle" Content="{Binding Loc.CopySelectionBtn}"
+                    Focusable="False" Margin="0,0,8,0" Click="OnCopyPreviewSelectionClick"/>
+            <Button x:Name="CopyPreviewAllBtn" Grid.Column="2" Classes="accent" Content="{Binding Loc.CopyAllBtn}"
+                    Focusable="False" Margin="0,0,8,0" Click="OnCopyPreviewAllClick"/>
+            <Button Grid.Column="3" Classes="subtle" Content="{Binding Loc.Close}" Command="{Binding ClosePreviewModalCommand}"/>
           </Grid>
-          <ScrollViewer Grid.Row="1">
-            <SelectableTextBlock Text="{Binding PreviewText}" FontFamily="{StaticResource WinMonoFontFamily}" FontSize="12.5" TextWrapping="Wrap"/>
-          </ScrollViewer>
+          <TextBox x:Name="PreviewTextBox"
+                   Grid.Row="1"
+                   Text="{Binding PreviewText, Mode=OneWay}"
+                   IsReadOnly="True"
+                   AcceptsReturn="True"
+                   TextWrapping="Wrap"
+                   VerticalAlignment="Stretch"
+                   VerticalContentAlignment="Top"
+                   ScrollViewer.VerticalScrollBarVisibility="Auto"
+                   ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                   FontFamily="{StaticResource WinMonoFontFamily}"
+                   FontSize="12.5"
+                   Padding="12"
+                   Background="{DynamicResource WinCodeBackBrush}"
+                   SelectionBrush="#5538BDF8"/>
         </Grid>
       </Border>
     </Border>
