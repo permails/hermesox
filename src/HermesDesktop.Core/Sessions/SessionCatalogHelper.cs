@@ -37,6 +37,22 @@ public static class SessionCatalogHelper
         return (kept, removed);
     }
 
+    public static SavedDashboard? ResolveStartupDashboard(
+        IEnumerable<SavedDashboard> dashboards,
+        Guid? activeDashboardId)
+    {
+        var list = dashboards.ToList();
+        if (list.Count == 0) return null;
+
+        if (activeDashboardId.HasValue)
+        {
+            var exact = list.FirstOrDefault(d => d.Id == activeDashboardId.Value);
+            if (exact is not null) return exact;
+        }
+
+        return list.OrderByDescending(d => d.LastConnectedAt).FirstOrDefault();
+    }
+
     public static bool SessionsMatch(SessionSummary candidate, SessionSummary target, string? targetRuntimeId = null)
     {
         if (ReferenceEquals(candidate, target)) return true;

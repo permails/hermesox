@@ -112,4 +112,38 @@ public class SessionCatalogHelperTests
         Assert.Equal("rt-1", deduped[0].RuntimeSessionId);
         Assert.Contains("rt-1", deduped[0].AlternateIds);
     }
+
+    [Fact]
+    public void ResolveStartupDashboard_PrefersActiveThenFallsBackToMostRecent()
+    {
+        var olderId = Guid.NewGuid();
+        var newerId = Guid.NewGuid();
+        var dashboards = new[]
+        {
+            new SavedDashboard
+            {
+                Id = olderId,
+                Label = "Server A",
+                NormalizedUrl = "http://192.168.10.67:9119",
+                LastConnectedAt = DateTimeOffset.UtcNow.AddHours(-3)
+            },
+            new SavedDashboard
+            {
+                Id = newerId,
+                Label = "Server B",
+                NormalizedUrl = "http://localhost:9119",
+                LastConnectedAt = DateTimeOffset.UtcNow
+            }
+        };
+
+        // Prefers ActiveDashboardId even when another server has a newer timestamp.
+        var activePick = SessionCatalogHelper.ResolveStartupDashboard(dashboards, olderId);
+        Assert.Equal(olderId, activePick?.Id);
+
+        // Falls back to the most recently connected server when ActiveDashboardId is missing or deleted.
+        var fallbackPick = SessionCatalogHelper.ResolveStartupDashboard(dashboards, Guid.NewGuid());
+        Assert.Equal(newerId, fallbackPick?.Id);
+
+        Assert.Null(SessionCatalogHelper.ResolveStartupDashboard([], olderId));
+    }
 }

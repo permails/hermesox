@@ -402,13 +402,10 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             OnPropertyChanged(nameof(HasNoSavedDashboards));
         };
 
-        if (_settings.ActiveDashboardId.HasValue)
+        var startupDashboard = SessionCatalogHelper.ResolveStartupDashboard(SavedDashboards, _settings.ActiveDashboardId);
+        if (startupDashboard is not null)
         {
-            var last = SavedDashboards.FirstOrDefault(d => d.Id == _settings.ActiveDashboardId.Value);
-            if (last is not null)
-            {
-                _ = TryReconnectSavedAsync(last);
-            }
+            _ = TryReconnectSavedAsync(startupDashboard);
         }
     }
 
@@ -610,18 +607,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     {
         ConnectError = null;
         EditingDashboardId = dashboard.Id;
-        var secrets = _vault.LoadSecrets(dashboard.Id);
-
-        ConnectLabel = dashboard.Label;
-        ConnectUrl = dashboard.NormalizedUrl;
-        UseSessionTokenAuth = dashboard.AuthMode == AuthMode.SessionToken;
-        ConnectUsername = dashboard.Username ?? secrets?.Username ?? "";
-        ConnectPassword = secrets?.Password ?? "";
-        ConnectSessionToken = secrets?.SessionToken ?? "";
-        UseCloudflareAccess = dashboard.UseCloudflareAccess;
-        CfClientId = secrets?.CfAccessClientId ?? "";
-        CfClientSecret = secrets?.CfAccessClientSecret ?? "";
-        IsAdvancedProxyExpanded = dashboard.UseCloudflareAccess;
+        PopulateConnectFormFromSaved(dashboard, _vault.LoadSecrets(dashboard.Id));
     }
 
     [RelayCommand]
@@ -732,7 +718,26 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         _cache.DeleteDashboard(dashboard.Id);
         _vault.DeleteSecrets(dashboard.Id);
         SavedDashboards.Remove(dashboard);
+        if (_settings.ActiveDashboardId == dashboard.Id)
+        {
+            _settings.ActiveDashboardId = SavedDashboards.FirstOrDefault()?.Id;
+            _cache.SaveSettings(_settings);
+        }
         if (EditingDashboardId == dashboard.Id) CancelEditSavedDashboard();
+    }
+
+    private void PopulateConnectFormFromSaved(SavedDashboard dashboard, DashboardSecrets? secrets = null)
+    {
+        ConnectLabel = dashboard.Label;
+        ConnectUrl = dashboard.NormalizedUrl;
+        UseSessionTokenAuth = dashboard.AuthMode == AuthMode.SessionToken;
+        ConnectUsername = dashboard.Username ?? secrets?.Username ?? "";
+        ConnectPassword = secrets?.Password ?? "";
+        ConnectSessionToken = secrets?.SessionToken ?? "";
+        UseCloudflareAccess = dashboard.UseCloudflareAccess;
+        CfClientId = secrets?.CfAccessClientId ?? "";
+        CfClientSecret = secrets?.CfAccessClientSecret ?? "";
+        IsAdvancedProxyExpanded = dashboard.UseCloudflareAccess;
     }
 
     private async Task TryReconnectSavedAsync(SavedDashboard dashboard)
@@ -740,9 +745,11 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         var secrets = _vault.LoadSecrets(dashboard.Id);
         if (secrets is null)
         {
-            ConnectUrl = dashboard.NormalizedUrl;
-            ConnectLabel = dashboard.Label;
-            ConnectUsername = dashboard.Username ?? "";
+            EditingDashboardId = dashboard.Id;
+            PopulateConnectFormFromSaved(dashboard);
+            ConnectError = AppLocalization.T(
+                "Saved credentials could not be loaded. Please re-enter them and connect.",
+                "未读取到已保存的登录凭据，请重新填写并连接。");
             ShowConnectOverlay = true;
             return;
         }
@@ -753,12 +760,18 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         try
         {
             await EstablishConnectionAsync(dashboard, secrets);
-            _settings.ActiveDashboardId = dashboard.Id;
+            var updated = dashboard with { LastConnectedAt = DateTimeOffset.UtcNow };
+            _cache.SaveDashboard(updated);
+            var idx = SavedDashboards.IndexOf(dashboard);
+            if (idx >= 0) SavedDashboards[idx] = updated;
+            _settings.ActiveDashboardId = updated.Id;
             _cache.SaveSettings(_settings);
             ShowConnectOverlay = false;
         }
         catch (Exception ex)
         {
+            EditingDashboardId = dashboard.Id;
+            PopulateConnectFormFromSaved(dashboard, secrets);
             ConnectionPhase = ConnectionPhase.Error;
             ConnectError = ex.Message;
             StatusBanner = $"Reconnect failed: {ex.Message}";
@@ -1025,9 +1038,23 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
             ApplySessionFilter(previousActive, previousRuntimeId);
 
-            if (ActiveSession is null && previousActive is null && FilteredSessions.Count > 0)
+            if (ActiveSession is null && string.IsNullOrWhiteSpace(SessionSearchQuery))
             {
-                await SelectAndOpenSessionAsync(FilteredSessions[0]);
+                if (FilteredSessions.Count > 0)
+                {
+                    await SelectAndOpenSessionAsync(FilteredSessions[0]);
+                }
+                else
+                {
+                    Interlocked.Increment(ref _openSessionGeneration);
+                    ClearActiveTranscriptState();
+                    ComposerText = "";
+                    CurrentModelLabel = SelectedProfile?.Model ?? "default";
+                    ContextPercent = 0;
+                    ContextUsed = 0;
+                    ContextMax = 0;
+                    CurrentCwd = null;
+                }
             }
         }
         catch (Exception ex)
@@ -1413,9 +1440,24 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand]
     private async Task SendOrQueueAsync()
     {
-        if (_wsClient is null || ActiveSession is null) return;
+        if (_wsClient is null) return;
         var text = ComposerText.Trim();
         if (string.IsNullOrEmpty(text)) return;
+
+        if (ActiveSession is null)
+        {
+            if (!_wsClient.IsConnected)
+            {
+                StatusBanner = AppLocalization.T("Not connected to Hermes.", "尚未连接到 Hermes。");
+                return;
+            }
+            await CreateNewSessionAsync();
+            if (ActiveSession is null)
+            {
+                ComposerText = text;
+                return;
+            }
+        }
 
         ComposerText = "";
         _cache.SaveDraft(DraftKey(ActiveSession.Id), "");
