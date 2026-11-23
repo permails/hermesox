@@ -181,8 +181,11 @@ public sealed class LocStrings : INotifyPropertyChanged
     public string Reload => L("Reload", "重新加载");
     public string DisplayNameTitleLabel => L("Display Name / Title", "显示名称 / 标题");
     public string DisplayNameTitleWatermark => L("e.g. Math Tutor / Atlas", "例如：数学辅导 / Atlas");
-    public string ProfileSlugLabel => L("Profile Slug (a-z, 0-9, _ or -)", "Profile 标识 (小写字母、数字、_ 或 -)");
-    public string ProfileSlugWatermark => L("e.g. math-tutor", "例如：math-tutor");
+    public string ProfileSlugLabel => L("Bot ID / @handle * (Required)", "智能体 ID / @用户名 *（必填）");
+    public string ProfileSlugWatermark => L("e.g. pm-expert (lowercase, digits, _ or -)", "例如：pm-expert（英文、数字、_ 或 -）");
+    public string ProfileSlugHint => L(
+        "Required. Used as this bot's unique folder ID and @mention handle across bots & CLI (no auto-generation).",
+        "必填项：用于多智能体之间 @点名协作与后端配置标识（不会再根据中文自动生成乱码）。");
     public string DisplayTitleLabel => L("Display Title", "显示名称");
     public string DisplayTitleWatermark => L("Profile display name", "Profile 显示名称");
     public string DuplicateAsNewSoul => L("Duplicate as New Soul", "复制为新 Soul");

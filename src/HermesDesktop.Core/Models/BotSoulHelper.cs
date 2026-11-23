@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -31,6 +32,7 @@ public static class BotSoulHelper
 
         var trimmed = rawName.Trim();
         var folded = new StringBuilder();
+        var hadNonAscii = false;
 
         foreach (var rune in trimmed.EnumerateRunes())
         {
@@ -60,7 +62,8 @@ public static class BotSoulHelper
             }
             else
             {
-                folded.Append("-u").Append(rune.Value.ToString("x")).Append('-');
+                hadNonAscii = true;
+                folded.Append('-');
             }
         }
 
@@ -93,6 +96,20 @@ public static class BotSoulHelper
         {
             collapsed = collapsed.TrimStart('_', '-');
         }
+
+        if (hadNonAscii)
+        {
+            var hash = SHA256.HashData(Encoding.UTF8.GetBytes(trimmed));
+            var shortHex = Convert.ToHexString(hash.AsSpan(0, 3)).ToLowerInvariant();
+            if (string.IsNullOrEmpty(collapsed))
+            {
+                return $"bot-{shortHex}";
+            }
+            var prefixMax = MaxSlugLength - shortHex.Length - 1;
+            var prefix = collapsed.Length > prefixMax ? collapsed[..prefixMax].Trim('-', '_') : collapsed;
+            return string.IsNullOrEmpty(prefix) ? $"bot-{shortHex}" : $"{prefix}-{shortHex}";
+        }
+
         if (collapsed.Length <= MaxSlugLength) return collapsed;
 
         var cut = collapsed[..MaxSlugLength];

@@ -142,6 +142,9 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly DispatcherTimer _streamFlushTimer;
     private readonly DispatcherTimer _backgroundNoticeTimer;
     private readonly Dictionary<string, MessageItemViewModel> _activeTools = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<PendingAttachmentItem>> _draftAttachmentsBySession = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _composerErrorsBySession = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _uploadingSessionKeys = new(StringComparer.Ordinal);
     private string? _activeRuntimeSessionId;
     private string? _streamBufferSessionId;
     private SessionSummary? _openedSession;
@@ -156,7 +159,6 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private string _soulOriginalDescription = "";
     private string _soulOriginalText = "";
     private string _soulOriginalTitle = "";
-    private bool _soulSlugEditedManually;
 
     public event Action<bool>? TranscriptScrollRequested;
     public event Action<bool>? BesideScrollRequested;
@@ -229,7 +231,16 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty] private string? _composerError;
     public bool HasComposerError => !string.IsNullOrWhiteSpace(ComposerError);
     partial void OnComposerErrorChanged(string? value) => OnPropertyChanged(nameof(HasComposerError));
-    [RelayCommand] private void DismissComposerError() => ComposerError = null;
+    [RelayCommand]
+    private void DismissComposerError()
+    {
+        ComposerError = null;
+        var current = _openedSession ?? ActiveSession;
+        if (current is not null)
+        {
+            _composerErrorsBySession.Remove(SessionAttachmentKey(current));
+        }
+    }
     public ObservableCollection<PendingAttachmentItem> PendingAttachments { get; } = [];
     public bool HasPendingAttachments => PendingAttachments.Count > 0;
     [ObservableProperty] private string _currentModelLabel = "default";
@@ -534,13 +545,6 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     {
         OnPropertyChanged(nameof(SoulEditorHeaderTitle));
         OnPropertyChanged(nameof(CanDeleteEditingProfile));
-    }
-    partial void OnSoulEditorTitleInputChanged(string value)
-    {
-        if (IsCreatingSoul && !_soulSlugEditedManually)
-        {
-            SoulEditorSlugInput = BotSoulHelper.ToSlug(value);
-        }
     }
     partial void OnSoulEditorTextChanged(string value) => OnPropertyChanged(nameof(SoulCharCountLabel));
     partial void OnHtmlPreviewZoomChanged(double value)
@@ -925,6 +929,12 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         _backgroundNoticeTimer.Stop();
         BackgroundNoticeSession = null;
         PendingDeleteSession = null;
+        _draftAttachmentsBySession.Clear();
+        _composerErrorsBySession.Clear();
+        _uploadingSessionKeys.Clear();
+        PendingAttachments.Clear();
+        ComposerError = null;
+        IsUploadingAttachments = false;
         DeleteSessionError = null;
         IsDeletingSession = false;
         IsLoadingMessages = false;
@@ -1123,6 +1133,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 }
                 else
                 {
+                    SwapComposerStateForSessionSwitch(null);
+                    _openedSession = null;
                     Interlocked.Increment(ref _openSessionGeneration);
                     ClearActiveTranscriptState();
                     ComposerText = "";
@@ -1233,6 +1245,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             }
 
             MarkOutgoingSessionRunningIfBusy(summary);
+            SwapComposerStateForSessionSwitch(summary);
             _openedSession = summary;
             Interlocked.Increment(ref _openSessionGeneration);
             ClearActiveTranscriptState(created.SessionId);
@@ -1255,6 +1268,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     {
         if (_wsClient is null || _restClient is null) return;
         MarkOutgoingSessionRunningIfBusy(session);
+        SwapComposerStateForSessionSwitch(session);
         _openedSession = session;
         session.TaskStatus = BackgroundTaskState.None;
         session.IsUnread = false;
@@ -1428,6 +1442,10 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 : target.RuntimeSessionId;
 
             _allSessions.RemoveAll(s => SessionsMatch(s, target, deletedRuntime));
+            var deletedKey = SessionAttachmentKey(target);
+            _draftAttachmentsBySession.Remove(deletedKey);
+            _composerErrorsBySession.Remove(deletedKey);
+            _uploadingSessionKeys.Remove(deletedKey);
             _cache.SaveDraft(DraftKey(target.Id), "");
             if (!string.IsNullOrEmpty(target.StoredSessionId))
             {
@@ -1452,6 +1470,9 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
             if (deletedActive)
             {
+                PendingAttachments.Clear();
+                ComposerError = null;
+                IsUploadingAttachments = false;
                 Interlocked.Increment(ref _openSessionGeneration);
                 ClearActiveTranscriptState();
                 _openedSession = null;
@@ -1759,13 +1780,17 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             }
         }
 
+        var sourceSession = ActiveSession;
+        var sourceKey = SessionAttachmentKey(sourceSession);
         var stagedToSend = PendingAttachments.ToList();
         PendingAttachments.Clear();
+        _draftAttachmentsBySession.Remove(sourceKey);
+        _composerErrorsBySession.Remove(sourceKey);
         ComposerText = "";
-        _cache.SaveDraft(DraftKey(ActiveSession.Id), "");
+        _cache.SaveDraft(DraftKey(sourceSession.Id), "");
 
-        var profile = ActiveSession.Profile ?? SelectedProfile?.Name;
-        var targetId = _activeRuntimeSessionId ?? ActiveSession.RuntimeSessionId ?? ActiveSession.Id;
+        var profile = sourceSession.Profile ?? SelectedProfile?.Name;
+        var targetId = _activeRuntimeSessionId ?? sourceSession.RuntimeSessionId ?? sourceSession.Id;
         var queued = IsRunningTurn;
 
         var msgId = Guid.NewGuid().ToString("N");
@@ -1780,12 +1805,13 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             {
                 var reconnectedId = await EnsureWsReconnectedForActiveSessionAsync(profile);
                 if (!string.IsNullOrEmpty(reconnectedId)) targetId = reconnectedId;
-                queued = IsRunningTurn;
+                queued = IsSourceSessionCurrentlyOpen(sourceSession) && IsRunningTurn;
             }
 
             if (stagedToSend.Count > 0)
             {
-                IsUploadingAttachments = true;
+                _uploadingSessionKeys.Add(sourceKey);
+                RefreshUploadingIndicatorForActiveSession();
                 try
                 {
                     var uploaded = await UploadPendingAttachmentsAsync(targetId, profile, stagedToSend, msgId);
@@ -1796,11 +1822,10 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 catch (Exception uploadEx)
                 {
                     await DetachStagedImagesAsync(targetId, profile, stagedImagePaths);
-                    RestoreUnsentDraft(text, stagedToSend);
                     var err = AppLocalization.T(
                         $"Attachment upload failed: {uploadEx.Message}",
                         $"附件上传失败：{uploadEx.Message}");
-                    ComposerError = err;
+                    RestoreUnsentDraftForSession(sourceSession, text, stagedToSend, err);
                     StatusBanner = err;
                     AppDiagnostics.Log("UPLOAD_ERR", uploadEx.Message);
                     if (_wsClient is not { IsConnected: true } && _activeDashboard is not null)
@@ -1811,32 +1836,45 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 }
                 finally
                 {
-                    IsUploadingAttachments = false;
+                    _uploadingSessionKeys.Remove(sourceKey);
+                    RefreshUploadingIndicatorForActiveSession();
                 }
             }
 
-            ActiveMessages.Add(new MessageItemViewModel(new ChatMessage
+            var isStillOnSource = IsSourceSessionCurrentlyOpen(sourceSession);
+            if (isStillOnSource)
             {
-                Id = msgId,
-                Role = MessageRole.User,
-                Content = cleanText,
-                Attachments = bubbleAttachments.Count > 0 ? bubbleAttachments : null,
-                Timestamp = DateTimeOffset.Now.ToString("HH:mm")
-            }));
-            RecomputeTranscriptPresentation(ActiveMessages, IsRunningTurn);
-            TranscriptScrollRequested?.Invoke(true);
+                ActiveMessages.Add(new MessageItemViewModel(new ChatMessage
+                {
+                    Id = msgId,
+                    Role = MessageRole.User,
+                    Content = cleanText,
+                    Attachments = bubbleAttachments.Count > 0 ? bubbleAttachments : null,
+                    Timestamp = DateTimeOffset.Now.ToString("HH:mm")
+                }));
+                RecomputeTranscriptPresentation(ActiveMessages, IsRunningTurn);
+                TranscriptScrollRequested?.Invoke(true);
+            }
 
             var outboundPrompt = AttachmentUploadHelper.BuildPromptWithFileReferences(text, fileReferences);
             var outcome = await _wsClient.SubmitPromptAsync(targetId, outboundPrompt, profile, queued: queued);
             AppDiagnostics.Log("SEND", $"Submitted session={targetId}, queued={queued}, outcome={outcome}, files={stagedToSend.Count}");
             _lastActiveStreamEventAt = DateTimeOffset.UtcNow;
-            if (!queued) IsRunningTurn = true;
-            _openedSession = ActiveSession;
-            ActiveSession.IsActive = true;
-            ActiveSession.TaskStatus = BackgroundTaskState.None;
-            ActiveSession.IsUnread = false;
-            ActiveSession.LastActivityAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            StatusBanner = $"Connected · {_activeDashboard?.Label}";
+
+            sourceSession.IsActive = true;
+            sourceSession.IsUnread = false;
+            sourceSession.LastActivityAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            if (IsSourceSessionCurrentlyOpen(sourceSession))
+            {
+                if (!queued) IsRunningTurn = true;
+                _openedSession = sourceSession;
+                sourceSession.TaskStatus = BackgroundTaskState.None;
+                StatusBanner = $"Connected · {_activeDashboard?.Label}";
+            }
+            else
+            {
+                sourceSession.TaskStatus = BackgroundTaskState.Running;
+            }
         }
         catch (RpcException rpcEx) when (rpcEx.Message.Contains("session not found", StringComparison.OrdinalIgnoreCase))
         {
@@ -1844,15 +1882,19 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             // Re-resume once to acquire a fresh live runtime session_id and retry
             try
             {
-                var resumed = await _wsClient.OpenSessionAsync(ActiveSession.StoredSessionId ?? ActiveSession.Id, profile);
-                _activeRuntimeSessionId = resumed.SessionId;
-                ActiveSession.RuntimeSessionId = resumed.SessionId;
+                var resumed = await _wsClient.OpenSessionAsync(sourceSession.StoredSessionId ?? sourceSession.Id, profile);
+                sourceSession.RuntimeSessionId = resumed.SessionId;
+                if (IsSourceSessionCurrentlyOpen(sourceSession))
+                {
+                    _activeRuntimeSessionId = resumed.SessionId;
+                }
 
                 var retryPrompt = text;
                 List<string> retryStagedImages = [];
                 if (stagedToSend.Count > 0)
                 {
-                    IsUploadingAttachments = true;
+                    _uploadingSessionKeys.Add(sourceKey);
+                    RefreshUploadingIndicatorForActiveSession();
                     try
                     {
                         var reuploaded = await UploadPendingAttachmentsAsync(resumed.SessionId, profile, stagedToSend, msgId);
@@ -1861,7 +1903,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                     }
                     finally
                     {
-                        IsUploadingAttachments = false;
+                        _uploadingSessionKeys.Remove(sourceKey);
+                        RefreshUploadingIndicatorForActiveSession();
                     }
                 }
 
@@ -1876,27 +1919,55 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 }
 
                 _lastActiveStreamEventAt = DateTimeOffset.UtcNow;
-                IsRunningTurn = true;
-                _openedSession = ActiveSession;
-                ActiveSession.IsActive = true;
-                StatusBanner = $"Connected · {_activeDashboard?.Label}";
+                sourceSession.IsActive = true;
+                if (IsSourceSessionCurrentlyOpen(sourceSession))
+                {
+                    IsRunningTurn = true;
+                    _openedSession = sourceSession;
+                    sourceSession.TaskStatus = BackgroundTaskState.None;
+                    StatusBanner = $"Connected · {_activeDashboard?.Label}";
+                }
+                else
+                {
+                    sourceSession.TaskStatus = BackgroundTaskState.Running;
+                }
                 AppDiagnostics.Log("SEND", $"Retried after session.resume -> {resumed.SessionId}");
             }
             catch (Exception retryEx)
             {
-                IsRunningTurn = false;
+                if (IsSourceSessionCurrentlyOpen(sourceSession))
+                {
+                    IsRunningTurn = false;
+                    AppendSystemNotice($"Send failed: {retryEx.Message}");
+                }
+                else
+                {
+                    sourceSession.IsActive = false;
+                    sourceSession.TaskStatus = BackgroundTaskState.Failed;
+                    sourceSession.BackgroundStatusDetail = retryEx.Message;
+                    ShowBackgroundTaskNotification(sourceSession, BackgroundTaskState.Failed);
+                }
                 StatusBanner = $"Send failed: {retryEx.Message}";
                 AppDiagnostics.Log("SEND_ERR", retryEx.Message);
-                AppendSystemNotice($"Send failed: {retryEx.Message}");
             }
         }
         catch (Exception ex)
         {
             await DetachStagedImagesAsync(targetId, profile, stagedImagePaths);
-            if (!queued) IsRunningTurn = false;
+            if (IsSourceSessionCurrentlyOpen(sourceSession))
+            {
+                if (!queued) IsRunningTurn = false;
+                AppendSystemNotice($"Send failed: {ex.Message}");
+            }
+            else if (!queued)
+            {
+                sourceSession.IsActive = false;
+                sourceSession.TaskStatus = BackgroundTaskState.Failed;
+                sourceSession.BackgroundStatusDetail = ex.Message;
+                ShowBackgroundTaskNotification(sourceSession, BackgroundTaskState.Failed);
+            }
             StatusBanner = $"Send failed: {ex.Message}";
             AppDiagnostics.Log("SEND_ERR", ex.Message);
-            AppendSystemNotice($"Send failed: {ex.Message}");
         }
     }
 
@@ -1975,18 +2046,117 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private void RestoreUnsentDraft(string text, IReadOnlyList<PendingAttachmentItem> items)
+    private static string SessionAttachmentKey(SessionSummary session) =>
+        string.IsNullOrWhiteSpace(session.StoredSessionId) ? session.Id : session.StoredSessionId;
+
+    private bool IsSourceSessionCurrentlyOpen(SessionSummary source)
     {
-        if (string.IsNullOrWhiteSpace(ComposerText) && !string.IsNullOrEmpty(text))
+        var current = _openedSession ?? ActiveSession;
+        return current is not null && SessionsMatch(current, source, _activeRuntimeSessionId);
+    }
+
+    private void RefreshUploadingIndicatorForActiveSession()
+    {
+        var current = _openedSession ?? ActiveSession;
+        IsUploadingAttachments = current is not null && _uploadingSessionKeys.Contains(SessionAttachmentKey(current));
+    }
+
+    private void SwapComposerStateForSessionSwitch(SessionSummary? nextTarget)
+    {
+        var outgoing = _openedSession;
+        if (outgoing is not null && (nextTarget is null || !SessionsMatch(outgoing, nextTarget)))
         {
-            ComposerText = text;
-        }
-        foreach (var item in items)
-        {
-            if (!PendingAttachments.Contains(item))
+            var outgoingKey = SessionAttachmentKey(outgoing);
+            if (PendingAttachments.Count > 0)
             {
-                PendingAttachments.Add(item);
+                _draftAttachmentsBySession[outgoingKey] = PendingAttachments.ToList();
             }
+            else
+            {
+                _draftAttachmentsBySession.Remove(outgoingKey);
+            }
+
+            if (!string.IsNullOrWhiteSpace(ComposerError))
+            {
+                _composerErrorsBySession[outgoingKey] = ComposerError;
+            }
+            else
+            {
+                _composerErrorsBySession.Remove(outgoingKey);
+            }
+        }
+
+        PendingAttachments.Clear();
+        ComposerError = null;
+        if (nextTarget is not null)
+        {
+            var nextKey = SessionAttachmentKey(nextTarget);
+            if (_draftAttachmentsBySession.TryGetValue(nextKey, out var savedAttachments))
+            {
+                foreach (var item in savedAttachments)
+                {
+                    PendingAttachments.Add(item);
+                }
+            }
+            if (_composerErrorsBySession.TryGetValue(nextKey, out var savedError))
+            {
+                ComposerError = savedError;
+            }
+            IsUploadingAttachments = _uploadingSessionKeys.Contains(nextKey);
+        }
+        else
+        {
+            IsUploadingAttachments = false;
+        }
+    }
+
+    private void RestoreUnsentDraftForSession(
+        SessionSummary sourceSession,
+        string text,
+        IReadOnlyList<PendingAttachmentItem> items,
+        string? errorMessage)
+    {
+        if (IsSourceSessionCurrentlyOpen(sourceSession))
+        {
+            if (string.IsNullOrWhiteSpace(ComposerText) && !string.IsNullOrEmpty(text))
+            {
+                ComposerText = text;
+            }
+            foreach (var item in items)
+            {
+                if (!PendingAttachments.Contains(item))
+                {
+                    PendingAttachments.Add(item);
+                }
+            }
+            if (!string.IsNullOrWhiteSpace(errorMessage))
+            {
+                ComposerError = errorMessage;
+            }
+        }
+        else
+        {
+            if (!string.IsNullOrEmpty(text) && string.IsNullOrWhiteSpace(_cache.LoadDraft(DraftKey(sourceSession.Id))))
+            {
+                _cache.SaveDraft(DraftKey(sourceSession.Id), text);
+            }
+            var key = SessionAttachmentKey(sourceSession);
+            if (!_draftAttachmentsBySession.TryGetValue(key, out var list))
+            {
+                list = [];
+                _draftAttachmentsBySession[key] = list;
+            }
+            foreach (var item in items)
+            {
+                if (!list.Contains(item)) list.Add(item);
+            }
+            if (!string.IsNullOrWhiteSpace(errorMessage))
+            {
+                _composerErrorsBySession[key] = errorMessage;
+            }
+            sourceSession.TaskStatus = BackgroundTaskState.Failed;
+            sourceSession.BackgroundStatusDetail = errorMessage;
+            ShowBackgroundTaskNotification(sourceSession, BackgroundTaskState.Failed);
         }
     }
 
@@ -2343,7 +2513,6 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        _soulSlugEditedManually = false;
         IsCreatingSoul = true;
         IsConfirmingDeleteProfile = false;
         SoulEditorError = null;
@@ -2480,7 +2649,6 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         var copyDesc = SoulEditorDescription;
         var copySoul = SoulEditorText;
 
-        _soulSlugEditedManually = true;
         IsCreatingSoul = true;
         IsConfirmingDeleteProfile = false;
         SoulEditorError = null;
@@ -2512,18 +2680,28 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         {
             if (IsCreatingSoul)
             {
-                var slug = !string.IsNullOrWhiteSpace(SoulEditorSlugInput)
-                    ? SoulEditorSlugInput.Trim().ToLowerInvariant()
-                    : BotSoulHelper.ToSlug(SoulEditorTitleInput);
+                var rawSlug = SoulEditorSlugInput?.Trim() ?? "";
+                if (string.IsNullOrEmpty(rawSlug))
+                {
+                    SoulEditorError = AppLocalization.T(
+                        "Bot ID / @handle is required (lowercase letters, digits, _ or -, e.g. pm-expert).",
+                        "请填写智能体 ID / @用户名（必填，仅支持小写英文字母、数字、_ 或 -，如 pm-expert）。");
+                    return;
+                }
 
+                var slug = rawSlug.ToLowerInvariant();
                 if (!BotSoulHelper.IsValidSlug(slug))
                 {
-                    SoulEditorError = "Invalid profile slug. Use 1-64 chars matching [a-z0-9][a-z0-9_-]* (or enter a title).";
+                    SoulEditorError = AppLocalization.T(
+                        "Invalid Bot ID / @handle. Must start with a-z or 0-9 and use only a-z, 0-9, _ or - (max 64 chars).",
+                        "智能体 ID 格式无效：需以小写字母或数字开头，且只能包含小写字母、数字、_ 或 -（最多 64 个字符）。");
                     return;
                 }
                 if (ProfileChips.Any(p => string.Equals(p.Name, slug, StringComparison.OrdinalIgnoreCase)))
                 {
-                    SoulEditorError = $"Profile '@{slug}' already exists.";
+                    SoulEditorError = AppLocalization.T(
+                        $"Bot ID '@{slug}' already exists.",
+                        $"智能体 ID '@{slug}' 已存在。");
                     return;
                 }
 

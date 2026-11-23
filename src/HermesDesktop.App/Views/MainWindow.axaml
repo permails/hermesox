@@ -697,21 +697,27 @@
               </ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
                 <DataTemplate x:DataType="vm:ProfileOptionViewModel">
-                  <Border Classes="card" Width="320" Margin="0,0,12,12" Padding="16">
+                  <Border Classes="card" Width="320" Margin="0,0,12,12" Padding="16" ClipToBounds="True">
                     <StackPanel Spacing="10">
-                      <StackPanel Orientation="Horizontal" Spacing="10">
-                        <Border Width="36" Height="36" CornerRadius="18" Background="{DynamicResource WinAccentFillBrush}">
+                      <Grid ColumnDefinitions="Auto,*">
+                        <Border Grid.Column="0" Width="36" Height="36" CornerRadius="18" Margin="0,0,10,0"
+                                Background="{DynamicResource WinAccentFillBrush}" VerticalAlignment="Center">
                           <TextBlock Text="{Binding Initial}" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource WinAccentForegroundBrush}"
                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
-                        <StackPanel VerticalAlignment="Center">
-                          <StackPanel Orientation="Horizontal" Spacing="6">
-                            <TextBlock Text="{Binding DisplayName}" FontSize="15" FontWeight="SemiBold"/>
-                            <TextBlock Text="{Binding Name, StringFormat='@{0}'}" FontSize="11.5" Foreground="{DynamicResource WinTextTertiaryBrush}" VerticalAlignment="Center"/>
-                          </StackPanel>
-                          <TextBlock Text="{Binding ModelDisplay}" FontSize="11.5" Foreground="{DynamicResource WinAccentTextBrush}"/>
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                          <TextBlock Text="{Binding DisplayName}" FontSize="15" FontWeight="SemiBold"
+                                     TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding DisplayName}"/>
+                          <Grid ColumnDefinitions="Auto,*">
+                            <TextBlock Grid.Column="0" Text="{Binding ModelDisplay}" FontSize="11.5"
+                                       Foreground="{DynamicResource WinAccentTextBrush}" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="1" Text="{Binding Name, StringFormat='@{0}'}" FontSize="11"
+                                       Foreground="{DynamicResource WinTextTertiaryBrush}" VerticalAlignment="Center"
+                                       Margin="6,0,0,0" TextTrimming="CharacterEllipsis"
+                                       ToolTip.Tip="{Binding Name, StringFormat='@{0}'}"/>
+                          </Grid>
                         </StackPanel>
-                      </StackPanel>
+                      </Grid>
                       <TextBlock Text="{Binding DescriptionDisplay}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}" TextWrapping="Wrap" MaxLines="3"/>
                       <StackPanel Orientation="Horizontal" Spacing="6">
                         <Button Classes="accent" Content="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.OpenChatsBtn}"
@@ -1189,16 +1195,19 @@
 
               <!-- Personality & Basic Settings Panel -->
               <StackPanel Spacing="12" IsVisible="{Binding IsSoulPersonalitySubTab}">
-                <Grid ColumnDefinitions="*,*" IsVisible="{Binding IsCreatingSoul}">
-                  <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,8,0">
-                    <TextBlock Text="{Binding Loc.DisplayNameTitleLabel}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
-                    <TextBox Text="{Binding SoulEditorTitleInput}" Watermark="{Binding Loc.DisplayNameTitleWatermark}"/>
-                  </StackPanel>
-                  <StackPanel Grid.Column="1" Spacing="4" Margin="8,0,0,0">
-                    <TextBlock Text="{Binding Loc.ProfileSlugLabel}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
-                    <TextBox Text="{Binding SoulEditorSlugInput}" Watermark="{Binding Loc.ProfileSlugWatermark}"/>
-                  </StackPanel>
-                </Grid>
+                <StackPanel Spacing="4" IsVisible="{Binding IsCreatingSoul}">
+                  <Grid ColumnDefinitions="*,*">
+                    <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,8,0">
+                      <TextBlock Text="{Binding Loc.DisplayNameTitleLabel}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                      <TextBox Text="{Binding SoulEditorTitleInput}" Watermark="{Binding Loc.DisplayNameTitleWatermark}"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="4" Margin="8,0,0,0">
+                      <TextBlock Text="{Binding Loc.ProfileSlugLabel}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                      <TextBox Text="{Binding SoulEditorSlugInput}" Watermark="{Binding Loc.ProfileSlugWatermark}"/>
+                    </StackPanel>
+                  </Grid>
+                  <TextBlock Text="{Binding Loc.ProfileSlugHint}" FontSize="11" Foreground="{DynamicResource WinTextTertiaryBrush}" TextWrapping="Wrap"/>
+                </StackPanel>
 
                 <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding !IsCreatingSoul}">
                   <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,10,0">
