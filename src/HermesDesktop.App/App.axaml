@@ -35,6 +35,8 @@
           <SolidColorBrush x:Key="WinAccentTextBrush" Color="#99EBFF"/>
           <SolidColorBrush x:Key="WinAccentSoftBrush" Color="#1F60CDFF"/>
           <SolidColorBrush x:Key="WinAccentStrokeBrush" Color="#4D60CDFF"/>
+          <SolidColorBrush x:Key="WinSessionSelectedFillBrush" Color="#2B60CDFF"/>
+          <SolidColorBrush x:Key="WinSessionSelectedStrokeBrush" Color="#8860CDFF"/>
 
           <SolidColorBrush x:Key="WinSmokeScrimBrush" Color="#99000000"/>
           <SolidColorBrush x:Key="WinDialogSurfaceBrush" Color="#2C2C2C"/>
@@ -82,6 +84,8 @@
           <SolidColorBrush x:Key="WinAccentTextBrush" Color="#003E92"/>
           <SolidColorBrush x:Key="WinAccentSoftBrush" Color="#14005FB8"/>
           <SolidColorBrush x:Key="WinAccentStrokeBrush" Color="#33005FB8"/>
+          <SolidColorBrush x:Key="WinSessionSelectedFillBrush" Color="#1F005FB8"/>
+          <SolidColorBrush x:Key="WinSessionSelectedStrokeBrush" Color="#66005FB8"/>
 
           <SolidColorBrush x:Key="WinSmokeScrimBrush" Color="#4D000000"/>
           <SolidColorBrush x:Key="WinDialogSurfaceBrush" Color="#FFFFFF"/>
@@ -204,16 +208,27 @@
 
     <Style Selector="ListBox.sessions ListBoxItem">
       <Setter Property="Padding" Value="10,8"/>
-      <Setter Property="Margin" Value="0,1"/>
-      <Setter Property="CornerRadius" Value="4"/>
+      <Setter Property="Margin" Value="0,2"/>
+      <Setter Property="CornerRadius" Value="6"/>
       <Setter Property="Background" Value="Transparent"/>
-      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="BorderBrush" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="1"/>
     </Style>
     <Style Selector="ListBox.sessions ListBoxItem:pointerover /template/ ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource WinSubtleHoverBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource WinCardStrokeBrush}"/>
     </Style>
     <Style Selector="ListBox.sessions ListBoxItem:selected /template/ ContentPresenter">
-      <Setter Property="Background" Value="{DynamicResource WinSubtleHoverBrush}"/>
+      <Setter Property="Background" Value="{DynamicResource WinSessionSelectedFillBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource WinSessionSelectedStrokeBrush}"/>
+    </Style>
+    <Style Selector="ListBox.sessions ListBoxItem:selected:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource WinSessionSelectedFillBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource WinSessionSelectedStrokeBrush}"/>
+    </Style>
+    <Style Selector="ListBox.sessions ListBoxItem:selected:focus /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource WinSessionSelectedFillBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource WinSessionSelectedStrokeBrush}"/>
     </Style>
 
     <Style Selector="Border.card">

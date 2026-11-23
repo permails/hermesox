@@ -138,7 +138,7 @@
               <ListBox Grid.Row="1" Classes="sessions" ItemsSource="{Binding FilteredSessions}" SelectedItem="{Binding ActiveSession}" Background="Transparent">
                 <ListBox.ItemTemplate>
                   <DataTemplate x:DataType="models:SessionSummary">
-                    <Grid ColumnDefinitions="*,Auto" Background="Transparent">
+                    <Grid ColumnDefinitions="Auto,*,Auto" Background="Transparent">
                       <Grid.ContextMenu>
                         <ContextMenu>
                           <MenuItem Header="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.DeleteSession}"
@@ -146,7 +146,12 @@
                                     CommandParameter="{Binding}"/>
                         </ContextMenu>
                       </Grid.ContextMenu>
-                      <StackPanel Grid.Column="0" Spacing="3" Margin="0,0,6,0">
+                      <Border Grid.Column="0" Width="3" MinHeight="22" Margin="0,2,8,2" VerticalAlignment="Stretch">
+                        <Border CornerRadius="1.5"
+                                IsVisible="{Binding $parent[ListBoxItem].IsSelected}"
+                                Background="{DynamicResource WinAccentFillBrush}"/>
+                      </Border>
+                      <StackPanel Grid.Column="1" Spacing="3" Margin="0,0,6,0">
                         <Grid ColumnDefinitions="Auto,Auto,*,Auto">
                           <Ellipse Grid.Column="0" Width="8" Height="8" Fill="{DynamicResource WinAccentFillBrush}"
                                    IsVisible="{Binding ShowRunningDot}"
@@ -182,7 +187,7 @@
                         </StackPanel>
                       </StackPanel>
 
-                      <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+                      <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
                         <Button Classes="ghost" Content="★" FontSize="11"
                                 ToolTip.Tip="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.PinUnpinTip}"
                                 Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).TogglePinSessionCommand}"
