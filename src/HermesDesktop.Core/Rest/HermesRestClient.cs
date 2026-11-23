@@ -27,7 +27,7 @@ public sealed class HermesRestClient : IDisposable
             CookieContainer = auth.CookieJar,
             UseCookies = true
         };
-        _http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(25) };
+        _http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(60) };
     }
 
     public async Task<IReadOnlyList<BotProfile>> GetProfilesAsync(CancellationToken ct = default)

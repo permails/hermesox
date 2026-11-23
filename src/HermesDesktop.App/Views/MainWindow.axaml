@@ -503,11 +503,32 @@
                     VerticalAlignment="Bottom"
                     Margin="0,0,22,10"
                     Click="OnJumpToLatestClick"/>
+            <Border IsVisible="{Binding IsLoadingMessages}"
+                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                    Padding="18,12" CornerRadius="8"
+                    Background="{DynamicResource WinCardFillBrush}"
+                    BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="1">
+              <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                <ProgressBar IsIndeterminate="True" Width="96" Height="4" Foreground="{DynamicResource WinAccentFillBrush}" VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding Loc.LoadingHistoryNotice}" FontSize="12.5" Foreground="{DynamicResource WinTextSecondaryBrush}" VerticalAlignment="Center"/>
+              </StackPanel>
+            </Border>
             </Grid>
 
             <!-- Composer Bar -->
             <Border x:Name="ComposerDropTarget" Grid.Row="3" Classes="card" Padding="10" Margin="0,10,0,0" DragDrop.AllowDrop="True">
               <StackPanel Spacing="8">
+                <Border IsVisible="{Binding HasComposerError}" Padding="10,6" CornerRadius="6"
+                        Background="{DynamicResource WinErrorBannerFillBrush}"
+                        BorderBrush="{DynamicResource WinErrorBannerStrokeBrush}" BorderThickness="1">
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0" Text="{Binding ComposerError}" FontSize="12" TextWrapping="Wrap"
+                               Foreground="{DynamicResource WinErrorBannerTextBrush}" VerticalAlignment="Center"/>
+                    <Button Grid.Column="1" Classes="ghost" Content="✕" FontSize="11" Padding="6,2" Margin="8,0,0,0"
+                            Foreground="{DynamicResource WinErrorBannerTextBrush}"
+                            Command="{Binding DismissComposerErrorCommand}"/>
+                  </Grid>
+                </Border>
                 <ItemsControl ItemsSource="{Binding PendingAttachments}" IsVisible="{Binding HasPendingAttachments}">
                   <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
@@ -523,7 +544,8 @@
                           <Border IsVisible="{Binding IsImage}" Width="34" Height="34" CornerRadius="4" ClipToBounds="True">
                             <Image Source="{Binding Thumbnail}" Stretch="UniformToFill"/>
                           </Border>
-                          <TextBlock IsVisible="{Binding IsFileBadge}" Text="📄" FontSize="14" VerticalAlignment="Center"/>
+                          <TextBlock IsVisible="{Binding IsVideo}" Text="🎬" FontSize="14" VerticalAlignment="Center"/>
+                          <TextBlock IsVisible="{Binding IsGenericFile}" Text="📄" FontSize="14" VerticalAlignment="Center"/>
                           <StackPanel VerticalAlignment="Center" MaxWidth="160">
                             <TextBlock Text="{Binding Name}" FontSize="11.5" FontWeight="SemiBold"
                                        Foreground="{DynamicResource WinTextPrimaryBrush}" TextTrimming="CharacterEllipsis"/>
@@ -546,15 +568,18 @@
                 </StackPanel>
 
                 <Grid ColumnDefinitions="Auto,*,Auto">
-                  <Button Grid.Column="0" Classes="subtle" Content="📎" Padding="9,7" Margin="0,0,8,0"
-                          VerticalAlignment="Bottom"
-                          ToolTip.Tip="{Binding Loc.AttachFilesTip}"
-                          IsEnabled="{Binding !IsUploadingAttachments}"
-                          Click="OnAttachFilesClick"/>
+                  <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" Margin="0,0,8,0" VerticalAlignment="Bottom">
+                    <Button Classes="subtle" Content="📎" Padding="9,7"
+                            ToolTip.Tip="{Binding Loc.AttachFilesTip}"
+                            IsEnabled="{Binding !IsUploadingAttachments}"
+                            Click="OnAttachFilesClick"/>
+                    <Button Classes="subtle" Content="🎤" Padding="9,7"
+                            ToolTip.Tip="{Binding Loc.VoiceDictationTip}"
+                            Click="OnVoiceDictationClick"/>
+                  </StackPanel>
                   <TextBox Grid.Column="1" x:Name="ComposerInput" Text="{Binding ComposerText}"
                            AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="140"
-                           Watermark="{Binding Loc.ComposerWatermark}"
-                           KeyDown="OnComposerKeyDown"/>
+                           Watermark="{Binding Loc.ComposerWatermark}"/>
                   <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Bottom" Margin="8,0,0,0">
                     <Button Classes="subtle" Content="{Binding Loc.StopTurn}" IsVisible="{Binding IsRunningTurn}" Command="{Binding InterruptTurnCommand}"/>
                     <Button Classes="subtle" Content="{Binding Loc.Steer}" IsVisible="{Binding IsRunningTurn}" Command="{Binding SteerTurnCommand}"/>
@@ -607,7 +632,9 @@
               </ScrollViewer>
 
               <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,10,0,0">
-                <TextBox Grid.Column="0" Text="{Binding BesideComposerText}" Watermark="{Binding Loc.QuickMessageWatermark}"/>
+                <TextBox Grid.Column="0" x:Name="InlineBesideComposerInput" Text="{Binding BesideComposerText}"
+                         AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="90"
+                         Watermark="{Binding Loc.QuickMessageWatermark}"/>
                 <Button Grid.Column="1" Classes="accent" Content="{Binding Loc.Send}" Command="{Binding SendBesideQuickMessageCommand}" Margin="6,0,0,0"/>
               </Grid>
             </Grid>
@@ -1029,7 +1056,7 @@
                    VerticalAlignment="Stretch"
                    VerticalContentAlignment="Top"
                    ScrollViewer.VerticalScrollBarVisibility="Auto"
-                   ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                   ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                    FontFamily="{StaticResource WinMonoFontFamily}"
                    FontSize="12.5"
                    Padding="12"
@@ -1099,9 +1126,9 @@
 
     <!-- Multi-Soul / Profile SOUL.md Editor & Creator Overlay -->
     <Border Grid.RowSpan="3" IsVisible="{Binding IsSoulEditorOpen}" Background="{DynamicResource WinSmokeScrimBrush}">
-      <Border Classes="dialog" Width="820" Height="640" ClipToBounds="True"
+      <Border Classes="dialog" Width="820" MaxWidth="920" Height="600" MaxHeight="660" ClipToBounds="True"
               HorizontalAlignment="Center" VerticalAlignment="Center">
-        <Grid RowDefinitions="Auto,*,Auto" Height="640">
+        <Grid RowDefinitions="Auto,*,Auto">
           <!-- Header -->
           <Border Grid.Row="0" Padding="20,14" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="0,0,0,1" Background="{DynamicResource WinDialogFooterBrush}">
             <Grid ColumnDefinitions="*,Auto,Auto">

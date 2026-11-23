@@ -176,9 +176,10 @@ public sealed class AttachmentGalleryView : UserControl
 
     private Control BuildFileTile(Attachment att)
     {
+        var icon = att.Kind == AttachmentKind.Video ? "🎬" : "📎";
         var btn = new Button
         {
-            Content = $"📎 {att.Name}",
+            Content = $"{icon} {att.Name}",
             FontSize = 12,
             Padding = new Thickness(10, 6),
             Margin = new Thickness(0, 0, 8, 6),

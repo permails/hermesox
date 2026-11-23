@@ -12,6 +12,7 @@ public sealed record AppSettingsData
     public bool ShowBesideChatDefault { get; set; } = true;
     public string LanguagePreference { get; set; } = "system";
     public string ThemePreference { get; set; } = "system";
+    public string? LastAttachmentDirectory { get; set; }
 }
 
 public sealed class LocalCacheStore

@@ -52,6 +52,8 @@ public sealed class PendingAttachmentItem
     public string SizeLabel => AttachmentUploadHelper.FormatFileSize(Bytes.Length);
     public Bitmap? Thumbnail { get; init; }
     public bool IsImage => Kind == AttachmentKind.Image && Thumbnail is not null;
+    public bool IsVideo => Kind == AttachmentKind.Video;
+    public bool IsGenericFile => !IsImage && !IsVideo;
     public bool IsFileBadge => !IsImage;
 }
 
@@ -212,6 +214,10 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty] private bool _isRunningTurn;
     [ObservableProperty] private bool _isUploadingAttachments;
     [ObservableProperty] private string _composerText = "";
+    [ObservableProperty] private string? _composerError;
+    public bool HasComposerError => !string.IsNullOrWhiteSpace(ComposerError);
+    partial void OnComposerErrorChanged(string? value) => OnPropertyChanged(nameof(HasComposerError));
+    [RelayCommand] private void DismissComposerError() => ComposerError = null;
     public ObservableCollection<PendingAttachmentItem> PendingAttachments { get; } = [];
     public bool HasPendingAttachments => PendingAttachments.Count > 0;
     [ObservableProperty] private string _currentModelLabel = "default";
@@ -1251,30 +1257,57 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            var resume = await _wsClient.OpenSessionAsync(resumeKey, targetProfile);
+            if (_wsClient is null || !_wsClient.IsConnected)
+            {
+                await EnsureWsConnectedAsync();
+            }
             if (openGen != _openSessionGeneration) return;
 
-            _activeRuntimeSessionId = resume.SessionId;
-            session.RuntimeSessionId = resume.SessionId;
-            if (!string.IsNullOrWhiteSpace(resume.StoredSessionId))
+            SessionResumeResult? resume = null;
+            if (_wsClient is { IsConnected: true })
             {
-                session.StoredSessionId = resume.StoredSessionId;
+                try
+                {
+                    resume = await _wsClient.OpenSessionAsync(resumeKey, targetProfile);
+                }
+                catch (Exception wsEx)
+                {
+                    AppDiagnostics.Log("SESSION_WS_WARN", $"WS resume failed key={resumeKey}: {wsEx.Message}");
+                }
             }
-            SessionCatalogHelper.MergeAliases(session, session, resume.SessionId);
-            AppDiagnostics.Log("SESSION", $"Opened key={resumeKey} -> runtime={resume.SessionId}, stored={resume.StoredSessionId}, running={resume.IsRunning}");
+            if (openGen != _openSessionGeneration) return;
 
-            IsRunningTurn = resume.IsRunning;
-            session.IsActive = resume.IsRunning;
-            CurrentModelLabel = string.IsNullOrWhiteSpace(resume.Model)
-                ? (string.IsNullOrWhiteSpace(session.Model) ? "default" : session.Model)
-                : resume.Model;
-            ContextPercent = resume.ContextPercent;
-            ContextUsed = resume.ContextUsed;
-            ContextMax = resume.ContextMax;
-            CurrentCwd = resume.Cwd;
+            if (resume is not null)
+            {
+                _activeRuntimeSessionId = resume.SessionId;
+                session.RuntimeSessionId = resume.SessionId;
+                if (!string.IsNullOrWhiteSpace(resume.StoredSessionId))
+                {
+                    session.StoredSessionId = resume.StoredSessionId;
+                }
+                SessionCatalogHelper.MergeAliases(session, session, resume.SessionId);
+                AppDiagnostics.Log("SESSION", $"Opened key={resumeKey} -> runtime={resume.SessionId}, stored={resume.StoredSessionId}, running={resume.IsRunning}");
 
-            var historyKey = resume.StoredSessionId ?? session.StoredSessionId ?? session.Id;
+                IsRunningTurn = resume.IsRunning;
+                session.IsActive = resume.IsRunning;
+                CurrentModelLabel = string.IsNullOrWhiteSpace(resume.Model)
+                    ? (string.IsNullOrWhiteSpace(session.Model) ? "default" : session.Model)
+                    : resume.Model;
+                ContextPercent = resume.ContextPercent;
+                ContextUsed = resume.ContextUsed;
+                ContextMax = resume.ContextMax;
+                CurrentCwd = resume.Cwd;
+            }
+            else
+            {
+                _activeRuntimeSessionId = session.RuntimeSessionId ?? session.Id;
+                IsRunningTurn = session.IsActive;
+                CurrentModelLabel = string.IsNullOrWhiteSpace(session.Model) ? "default" : session.Model;
+            }
+
+            var historyKey = resume?.StoredSessionId ?? session.StoredSessionId ?? session.Id;
             IReadOnlyList<ChatMessage> messages = [];
+            string? historyLoadError = null;
             try
             {
                 messages = await _restClient.GetSessionMessagesAsync(historyKey, targetProfile);
@@ -1282,6 +1315,11 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             catch (HttpRequestException) when (session.MessageCount == 0)
             {
                 // Brand-new 0-message session may not have a persisted transcript row yet
+            }
+            catch (Exception histEx)
+            {
+                historyLoadError = histEx.Message;
+                AppDiagnostics.Log("HISTORY_ERR", $"History load failed key={historyKey}: {histEx.Message}");
             }
             if (openGen != _openSessionGeneration) return;
 
@@ -1292,6 +1330,13 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             {
                 ActiveMessages.Add(new MessageItemViewModel(msg));
             }
+            if (!string.IsNullOrEmpty(historyLoadError))
+            {
+                AppendSystemNotice(AppLocalization.T(
+                    $"Failed to load conversation history: {historyLoadError}",
+                    $"加载会话历史失败：{historyLoadError}"));
+                StatusBanner = AppLocalization.T($"History load failed: {historyLoadError}", $"加载历史失败：{historyLoadError}");
+            }
             RecomputeTranscriptPresentation(ActiveMessages, IsRunningTurn);
             TranscriptScrollRequested?.Invoke(true);
         }
@@ -1301,6 +1346,9 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             {
                 _activeRuntimeSessionId = session.RuntimeSessionId ?? session.Id;
                 StatusBanner = $"Open session failed: {ex.Message}";
+                AppendSystemNotice(AppLocalization.T(
+                    $"Open session failed: {ex.Message}",
+                    $"打开会话失败：{ex.Message}"));
                 AppDiagnostics.Log("SESSION_ERR", $"Open failed key={resumeKey}: {ex.Message}");
             }
         }
@@ -1507,6 +1555,31 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         await SendOrQueueAsync();
     }
 
+    public string? GetLastAttachmentDirectory()
+    {
+        var dir = _settings.LastAttachmentDirectory;
+        return !string.IsNullOrWhiteSpace(dir) && Directory.Exists(dir) ? dir : null;
+    }
+
+    public void RememberAttachmentDirectory(string? filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath)) return;
+        try
+        {
+            var dir = Path.GetDirectoryName(filePath);
+            if (!string.IsNullOrWhiteSpace(dir) && Directory.Exists(dir)
+                && !string.Equals(_settings.LastAttachmentDirectory, dir, StringComparison.OrdinalIgnoreCase))
+            {
+                _settings.LastAttachmentDirectory = dir;
+                _cache.SaveSettings(_settings);
+            }
+        }
+        catch
+        {
+            // Ignore transient settings save failure
+        }
+    }
+
     [RelayCommand]
     private void RemovePendingAttachment(PendingAttachmentItem? item)
     {
@@ -1516,24 +1589,32 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     public void StageLocalFile(string filePath)
     {
         if (string.IsNullOrWhiteSpace(filePath)) return;
+        RememberAttachmentDirectory(filePath);
         try
         {
             var info = new FileInfo(filePath);
             if (!info.Exists)
             {
-                StatusBanner = AppLocalization.T($"File not found: {filePath}", $"找不到文件：{filePath}");
+                var err = AppLocalization.T($"File not found: {filePath}", $"找不到文件：{filePath}");
+                ComposerError = err;
+                StatusBanner = err;
                 return;
             }
             if (info.Length <= 0)
             {
-                StatusBanner = AppLocalization.T($"File is empty: {info.Name}", $"文件为空：{info.Name}");
+                var err = AppLocalization.T($"File is empty: {info.Name}", $"文件为空：{info.Name}");
+                ComposerError = err;
+                StatusBanner = err;
                 return;
             }
             if (info.Length > AttachmentUploadHelper.MaxAttachmentBytes)
             {
-                StatusBanner = AppLocalization.T(
-                    $"File exceeds 25 MB limit: {info.Name}",
-                    $"文件超过 25 MB 限制：{info.Name}");
+                var maxMb = AttachmentUploadHelper.MaxAttachmentBytes / (1024 * 1024);
+                var err = AppLocalization.T(
+                    $"File exceeds {maxMb} MB limit ({AttachmentUploadHelper.FormatFileSize(info.Length)}): {info.Name}",
+                    $"文件超过 {maxMb} MB 限制（当前 {AttachmentUploadHelper.FormatFileSize(info.Length)}）：{info.Name}");
+                ComposerError = err;
+                StatusBanner = err;
                 return;
             }
 
@@ -1544,7 +1625,9 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            StatusBanner = AppLocalization.T($"Could not read file: {ex.Message}", $"读取文件失败：{ex.Message}");
+            var err = AppLocalization.T($"Could not read file: {ex.Message}", $"读取文件失败：{ex.Message}");
+            ComposerError = err;
+            StatusBanner = err;
         }
     }
 
@@ -1553,12 +1636,16 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         if (bytes is not { Length: > 0 }) return;
         if (bytes.Length > AttachmentUploadHelper.MaxAttachmentBytes)
         {
-            StatusBanner = AppLocalization.T(
-                $"Attachment exceeds 25 MB limit: {fileName}",
-                $"附件超过 25 MB 限制：{fileName}");
+            var maxMb = AttachmentUploadHelper.MaxAttachmentBytes / (1024 * 1024);
+            var err = AppLocalization.T(
+                $"Attachment exceeds {maxMb} MB limit: {fileName}",
+                $"附件超过 {maxMb} MB 限制：{fileName}");
+            ComposerError = err;
+            StatusBanner = err;
             return;
         }
 
+        ComposerError = null;
         var safeName = string.IsNullOrWhiteSpace(fileName) ? "attachment.bin" : Path.GetFileName(fileName);
         var resolvedMime = string.IsNullOrWhiteSpace(mimeType)
             ? AttachmentUploadHelper.GuessMimeType(safeName)
@@ -1594,10 +1681,25 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand]
     private async Task SendOrQueueAsync()
     {
-        if (_wsClient is null || IsUploadingAttachments) return;
+        if (IsUploadingAttachments) return;
         var text = ComposerText.Trim();
         var hasAttachments = PendingAttachments.Count > 0;
         if (string.IsNullOrEmpty(text) && !hasAttachments) return;
+        ComposerError = null;
+
+        if (_wsClient is null)
+        {
+            if (_activeDashboard is not null)
+            {
+                await EnsureWsConnectedAsync();
+            }
+            if (_wsClient is null)
+            {
+                StatusBanner = AppLocalization.T("Not connected to Hermes.", "尚未连接到 Hermes。");
+                ComposerError = StatusBanner;
+                return;
+            }
+        }
 
         if (ActiveSession is null)
         {
@@ -1652,8 +1754,16 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 {
                     await DetachStagedImagesAsync(targetId, profile, stagedImagePaths);
                     RestoreUnsentDraft(text, stagedToSend);
-                    StatusBanner = AppLocalization.T($"Attachment upload failed: {uploadEx.Message}", $"附件上传失败：{uploadEx.Message}");
+                    var err = AppLocalization.T(
+                        $"Attachment upload failed: {uploadEx.Message}",
+                        $"附件上传失败：{uploadEx.Message}");
+                    ComposerError = err;
+                    StatusBanner = err;
                     AppDiagnostics.Log("UPLOAD_ERR", uploadEx.Message);
+                    if (_wsClient is not { IsConnected: true } && _activeDashboard is not null)
+                    {
+                        _ = EnsureWsConnectedAsync();
+                    }
                     return;
                 }
                 finally
@@ -1845,11 +1955,12 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         TranscriptScrollRequested?.Invoke(false);
     }
 
-    private async Task<string?> EnsureWsReconnectedForActiveSessionAsync(string? profile)
+    private async Task<bool> EnsureWsConnectedAsync()
     {
-        if (_activeDashboard is null || ActiveSession is null) return null;
+        if (_wsClient is { IsConnected: true }) return true;
+        if (_activeDashboard is null) return false;
         var secrets = _vault.LoadSecrets(_activeDashboard.Id);
-        if (secrets is null) return null;
+        if (secrets is null) return false;
 
         try
         {
@@ -1871,6 +1982,23 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             await _wsClient.ConnectAsync(_activeDashboard.NormalizedUrl, ticket, secrets);
 
             ConnectionPhase = ConnectionPhase.Connected;
+            StatusBanner = $"Connected · {_activeDashboard.Label}";
+            return true;
+        }
+        catch (Exception ex)
+        {
+            AppDiagnostics.Log("WS_RECONN_ERR", ex.Message);
+            return false;
+        }
+    }
+
+    private async Task<string?> EnsureWsReconnectedForActiveSessionAsync(string? profile)
+    {
+        if (_activeDashboard is null || ActiveSession is null) return null;
+        if (!await EnsureWsConnectedAsync() || _wsClient is null) return null;
+
+        try
+        {
             var resumed = await _wsClient.OpenSessionAsync(ActiveSession.StoredSessionId ?? ActiveSession.Id, profile);
             _activeRuntimeSessionId = resumed.SessionId;
             ActiveSession.RuntimeSessionId = resumed.SessionId;
@@ -2130,9 +2258,10 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand]
     private async Task OpenSoulEditorForProfileAsync(ProfileOptionViewModel chip)
     {
-        if (_wsClient is null || !_wsClient.IsConnected)
+        if (_activeDashboard is null && _restClient is null && (_wsClient is null || !_wsClient.IsConnected))
         {
-            StatusBanner = "Connect to Hermes first to edit SOUL.md.";
+            ConnectError = AppLocalization.T("Connect to a Hermes server first.", "请先连接到 Hermes 服务器。");
+            ShowConnectOverlay = true;
             return;
         }
 
@@ -2150,15 +2279,20 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         _soulOriginalText = "";
         IsSoulEditorOpen = true;
 
+        if (_wsClient is not { IsConnected: true })
+        {
+            await EnsureWsConnectedAsync();
+        }
         await ReloadSoulFromServerAsync();
     }
 
     [RelayCommand]
     private void OpenCreateSoulModal()
     {
-        if (_wsClient is null || !_wsClient.IsConnected)
+        if (_activeDashboard is null && (_wsClient is null || !_wsClient.IsConnected))
         {
-            StatusBanner = "Connect to Hermes first to create a new Soul.";
+            ConnectError = AppLocalization.T("Connect to a Hermes server first to create a new bot.", "请先连接到 Hermes 服务器，再新建智能体。");
+            ShowConnectOverlay = true;
             return;
         }
 
@@ -2175,6 +2309,21 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         SoulEditorNoSkills = false;
         SoulEditorShareAuth = true;
         IsSoulEditorOpen = true;
+
+        if (_wsClient is not { IsConnected: true })
+        {
+            SoulEditorNotice = AppLocalization.T("Reconnecting to Hermes gateway...", "正在重新连接 Hermes 网关...");
+            _ = ReconnectForSoulModalAsync();
+        }
+    }
+
+    private async Task ReconnectForSoulModalAsync()
+    {
+        var ok = await EnsureWsConnectedAsync();
+        if (IsSoulEditorOpen && IsCreatingSoul)
+        {
+            SoulEditorNotice = ok ? null : AppLocalization.T("Gateway offline — will retry when creating.", "网关未连接，点击创建时将自动重连。");
+        }
     }
 
     [RelayCommand]
@@ -2301,8 +2450,11 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     {
         if (_wsClient is null || !_wsClient.IsConnected)
         {
-            SoulEditorError = "Not connected to Hermes gateway.";
-            return;
+            if (!await EnsureWsConnectedAsync() || _wsClient is null || !_wsClient.IsConnected)
+            {
+                SoulEditorError = AppLocalization.T("Not connected to Hermes gateway.", "尚未连接到 Hermes 网关。");
+                return;
+            }
         }
 
         SoulEditorError = null;
@@ -2585,9 +2737,10 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand]
     private void OpenCreateCronJobModal()
     {
-        if (_restClient is null)
+        if (_activeDashboard is null && _restClient is null)
         {
-            StatusBanner = AppLocalization.T("Connect to Hermes first.", "请先连接到 Hermes 网关。");
+            ConnectError = AppLocalization.T("Connect to Hermes first.", "请先连接到 Hermes 网关。");
+            ShowConnectOverlay = true;
             return;
         }
         IsCreatingCronJob = true;

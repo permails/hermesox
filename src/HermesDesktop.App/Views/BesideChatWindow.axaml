@@ -48,7 +48,9 @@
     </ScrollViewer>
 
     <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,10,0,0">
-      <TextBox Grid.Column="0" Text="{Binding BesideComposerText}" Watermark="{Binding Loc.QuickBesideWatermark}"/>
+      <TextBox Grid.Column="0" x:Name="BesideComposerInput" Text="{Binding BesideComposerText}"
+               AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="100"
+               Watermark="{Binding Loc.QuickBesideWatermark}"/>
       <Button Grid.Column="1" Classes="accent" Content="{Binding Loc.Send}" Command="{Binding SendBesideQuickMessageCommand}" Margin="8,0,0,0"/>
     </Grid>
   </Grid>

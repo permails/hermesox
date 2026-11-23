@@ -36,6 +36,10 @@ public class AttachmentUploadHelperTests
         Assert.Equal("image/png", AttachmentUploadHelper.GuessMimeType("screenshot.PNG"));
         Assert.Equal("text/markdown", AttachmentUploadHelper.GuessMimeType("README.md"));
         Assert.Equal("application/pdf", AttachmentUploadHelper.GuessMimeType("spec.pdf"));
+        Assert.Equal("video/mp4", AttachmentUploadHelper.GuessMimeType("clip.mp4"));
+        Assert.Equal("video/x-matroska", AttachmentUploadHelper.GuessMimeType("recording.mkv"));
+        Assert.Equal("video/x-msvideo", AttachmentUploadHelper.GuessMimeType("demo.avi"));
+        Assert.Equal("text/typescript", AttachmentUploadHelper.GuessMimeType("app.ts"));
         Assert.Equal("application/octet-stream", AttachmentUploadHelper.GuessMimeType("archive.unknown"));
 
         Assert.True(AttachmentUploadHelper.IsImageAttachRefusal(new RpcException(-32602, "Unsupported image format")));

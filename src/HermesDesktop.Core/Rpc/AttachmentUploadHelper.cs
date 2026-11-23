@@ -7,7 +7,7 @@ namespace HermesDesktop.Core.Rpc;
 /// </summary>
 public static class AttachmentUploadHelper
 {
-    public const int MaxAttachmentBytes = 25 * 1024 * 1024;
+    public const int MaxAttachmentBytes = 50 * 1024 * 1024;
 
     private static readonly Dictionary<string, string> MimeByExtension = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -31,6 +31,9 @@ public static class AttachmentUploadHelper
         [".html"] = "text/html",
         [".htm"] = "text/html",
         [".pdf"] = "application/pdf",
+        [".docx"] = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        [".xlsx"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        [".pptx"] = "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         [".py"] = "text/x-python",
         [".cs"] = "text/plain",
         [".js"] = "text/javascript",
@@ -38,8 +41,21 @@ public static class AttachmentUploadHelper
         [".sh"] = "text/x-shellscript",
         [".ps1"] = "text/plain",
         [".mp4"] = "video/mp4",
+        [".m4v"] = "video/x-m4v",
         [".mov"] = "video/quicktime",
         [".webm"] = "video/webm",
+        [".mkv"] = "video/x-matroska",
+        [".avi"] = "video/x-msvideo",
+        [".wmv"] = "video/x-ms-wmv",
+        [".flv"] = "video/x-flv",
+        [".m2ts"] = "video/mp2t",
+        [".3gp"] = "video/3gpp",
+        [".mp3"] = "audio/mpeg",
+        [".wav"] = "audio/wav",
+        [".m4a"] = "audio/mp4",
+        [".ogg"] = "audio/ogg",
+        [".flac"] = "audio/flac",
+        [".aac"] = "audio/aac",
         [".zip"] = "application/zip"
     };
 

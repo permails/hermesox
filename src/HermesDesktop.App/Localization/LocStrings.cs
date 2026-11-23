@@ -83,13 +83,18 @@ public sealed class LocStrings : INotifyPropertyChanged
     public string ClarificationNeeded => L("Clarification Needed", "需要进一步确认");
     public string ClarifyCustomWatermark => L("Or type a custom answer...", "或输入自定义回答...");
     public string Submit => L("Submit", "提交");
+    public string LoadingHistoryNotice => L("Loading conversation history...", "正在加载会话历史记录...");
     public string ComposerWatermark => L(
-        "Message Hermes... (Enter to send, Shift+Enter for newline)",
-        "给 Hermes 发消息... (Enter 发送，Shift+Enter 换行)");
+        "Message Hermes... (Enter or Ctrl+Enter to send, Shift+Enter for newline)",
+        "给 Hermes 发消息... (Enter 或 Ctrl+Enter 发送，Shift+Enter 换行)");
     public string Steer => L("Steer", "纠偏");
     public string Queue => L("Queue", "排队");
     public string Send => L("Send", "发送");
-    public string AttachFilesTip => L("Attach image or file (drag & drop or Ctrl+V image also supported)", "上传图片或文件（支持拖拽文件或直接 Ctrl+V 粘贴图片）");
+    public string AttachFilesTip => L("Attach image, video, or file (drag & drop or Ctrl+V screenshot supported)", "上传图片、视频或文件（支持拖拽文件或直接 Ctrl+V 粘贴截图）");
+    public string VoiceDictationTip => L("Voice to text (System IME voice typing Win+H)", "输入法语音转文字（调用系统语音输入 Win+H）");
+    public string VoiceDictationFallbackNotice => L(
+        "Place cursor in the input box and press Win+H (or your IME voice key) to start voice typing.",
+        "请点击输入框后按 Win+H（或输入法语音键）开启语音转文字。");
     public string UploadingAttachments => L("Uploading attachments...", "正在上传附件...");
     public string RemoveAttachmentTip => L("Remove attachment", "移除附件");
 

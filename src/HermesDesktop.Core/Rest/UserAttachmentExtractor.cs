@@ -32,7 +32,7 @@ public static class UserAttachmentExtractor
 
     private static readonly HashSet<string> VideoExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"
+        ".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".wmv", ".flv", ".3gp"
     };
 
     public static bool IsImagePath(string path)
