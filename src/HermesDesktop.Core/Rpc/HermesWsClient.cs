@@ -160,7 +160,21 @@ public sealed class HermesWsClient : IAsyncDisposable
             {
                 if (_socket != ws || ws.State != WebSocketState.Open)
                     throw new InvalidOperationException("WebSocket is not connected.");
-                await ws.SendAsync(frame, WebSocketMessageType.Text, endOfMessage: true, ct);
+
+                const int chunkSize = 262_144;
+                if (frame.Length <= chunkSize)
+                {
+                    await ws.SendAsync(frame, WebSocketMessageType.Text, endOfMessage: true, ct);
+                }
+                else
+                {
+                    for (var offset = 0; offset < frame.Length; offset += chunkSize)
+                    {
+                        var count = Math.Min(chunkSize, frame.Length - offset);
+                        var isFinal = offset + count >= frame.Length;
+                        await ws.SendAsync(frame.AsMemory(offset, count), WebSocketMessageType.Text, isFinal, ct);
+                    }
+                }
             }
             finally
             {

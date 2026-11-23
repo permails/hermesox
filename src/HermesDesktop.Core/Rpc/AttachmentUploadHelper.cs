@@ -7,7 +7,17 @@ namespace HermesDesktop.Core.Rpc;
 /// </summary>
 public static class AttachmentUploadHelper
 {
-    public const int MaxAttachmentBytes = 50 * 1024 * 1024;
+    public const int DefaultMaxAttachmentMegabytes = 256;
+    public const int MaxConfigurableAttachmentMegabytes = 512;
+    public const long MaxAttachmentBytes = (long)DefaultMaxAttachmentMegabytes * 1024 * 1024;
+
+    public static long ClampByteLimit(int megabytes)
+    {
+        var clamped = megabytes <= 0
+            ? DefaultMaxAttachmentMegabytes
+            : Math.Clamp(megabytes, 16, MaxConfigurableAttachmentMegabytes);
+        return (long)clamped * 1024 * 1024;
+    }
 
     private static readonly Dictionary<string, string> MimeByExtension = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -62,7 +72,7 @@ public static class AttachmentUploadHelper
     private static readonly char[] QuotingChars =
         [' ', '\t', '\r', '\n', '(', ')', '[', ']', '{', '}', '<', '>', '"', '\'', '`'];
 
-    public static TimeSpan UploadTimeoutForPayloadLength(int charCount) =>
+    public static TimeSpan UploadTimeoutForPayloadLength(long charCount) =>
         TimeSpan.FromSeconds(Math.Max(120, charCount / 64_000.0));
 
     public static string GuessMimeType(string fileName)

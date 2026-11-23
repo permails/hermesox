@@ -45,4 +45,14 @@ public class AttachmentUploadHelperTests
         Assert.True(AttachmentUploadHelper.IsImageAttachRefusal(new RpcException(-32602, "Unsupported image format")));
         Assert.False(AttachmentUploadHelper.IsImageAttachRefusal(new RpcException(4001, "session not found")));
     }
+
+    [Fact]
+    public void ClampByteLimitAndTimeout_SupportLargeVideos()
+    {
+        Assert.Equal(256L * 1024 * 1024, AttachmentUploadHelper.MaxAttachmentBytes);
+        Assert.Equal(256L * 1024 * 1024, AttachmentUploadHelper.ClampByteLimit(0));
+        Assert.Equal(512L * 1024 * 1024, AttachmentUploadHelper.ClampByteLimit(512));
+        Assert.Equal(512L * 1024 * 1024, AttachmentUploadHelper.ClampByteLimit(1024));
+        Assert.True(AttachmentUploadHelper.UploadTimeoutForPayloadLength(350_000_000L) > TimeSpan.FromMinutes(60));
+    }
 }

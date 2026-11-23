@@ -1,5 +1,6 @@
 using System.Text.Json;
 using HermesDesktop.Core.Models;
+using HermesDesktop.Core.Rpc;
 using Microsoft.Data.Sqlite;
 
 namespace HermesDesktop.Core.Storage;
@@ -13,6 +14,7 @@ public sealed record AppSettingsData
     public string LanguagePreference { get; set; } = "system";
     public string ThemePreference { get; set; } = "system";
     public string? LastAttachmentDirectory { get; set; }
+    public int MaxAttachmentMegabytes { get; set; } = AttachmentUploadHelper.DefaultMaxAttachmentMegabytes;
 }
 
 public sealed class LocalCacheStore

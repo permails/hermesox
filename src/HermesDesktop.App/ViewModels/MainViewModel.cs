@@ -46,15 +46,27 @@ public sealed class PendingAttachmentItem
 {
     public string Id { get; } = Guid.NewGuid().ToString("N");
     public required string Name { get; init; }
-    public required byte[] Bytes { get; init; }
+    public byte[]? Bytes { get; init; }
+    public string? LocalFilePath { get; init; }
+    public required long FileSizeBytes { get; init; }
     public required string MimeType { get; init; }
     public required AttachmentKind Kind { get; init; }
-    public string SizeLabel => AttachmentUploadHelper.FormatFileSize(Bytes.Length);
+    public string SizeLabel => AttachmentUploadHelper.FormatFileSize(FileSizeBytes);
     public Bitmap? Thumbnail { get; init; }
     public bool IsImage => Kind == AttachmentKind.Image && Thumbnail is not null;
     public bool IsVideo => Kind == AttachmentKind.Video;
     public bool IsGenericFile => !IsImage && !IsVideo;
     public bool IsFileBadge => !IsImage;
+
+    public async Task<byte[]> ReadBytesAsync()
+    {
+        if (Bytes is { Length: > 0 }) return Bytes;
+        if (!string.IsNullOrWhiteSpace(LocalFilePath) && File.Exists(LocalFilePath))
+        {
+            return await File.ReadAllBytesAsync(LocalFilePath);
+        }
+        throw new FileNotFoundException($"Attachment source is unavailable: {Name}", LocalFilePath);
+    }
 }
 
 public sealed partial class ProfileOptionViewModel(BotProfile profile, bool isSelected) : ObservableObject
@@ -317,6 +329,14 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     public bool IsSystemTheme => (_settings.ThemePreference ?? "system").Equals("system", StringComparison.OrdinalIgnoreCase);
     public bool IsDarkTheme => (_settings.ThemePreference ?? "system").Equals("dark", StringComparison.OrdinalIgnoreCase);
     public bool IsLightTheme => (_settings.ThemePreference ?? "system").Equals("light", StringComparison.OrdinalIgnoreCase);
+    private int EffectiveMaxAttachmentMegabytes => _settings.MaxAttachmentMegabytes <= 0
+        ? AttachmentUploadHelper.DefaultMaxAttachmentMegabytes
+        : Math.Clamp(_settings.MaxAttachmentMegabytes, 16, AttachmentUploadHelper.MaxConfigurableAttachmentMegabytes);
+    private long EffectiveMaxAttachmentBytes => AttachmentUploadHelper.ClampByteLimit(EffectiveMaxAttachmentMegabytes);
+    public bool IsAttachmentLimit64 => EffectiveMaxAttachmentMegabytes == 64;
+    public bool IsAttachmentLimit128 => EffectiveMaxAttachmentMegabytes == 128;
+    public bool IsAttachmentLimit256 => EffectiveMaxAttachmentMegabytes == 256;
+    public bool IsAttachmentLimit512 => EffectiveMaxAttachmentMegabytes == 512;
     public bool IsSoulPersonalitySubTab => IsCreatingSoul || SoulEditorSubTabIndex == 0;
     public bool IsSoulCapabilitiesSubTab => !IsCreatingSoul && SoulEditorSubTabIndex == 1;
     public bool HasEditingSkills => EditingSkills.Count > 0;
@@ -1607,21 +1627,43 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 StatusBanner = err;
                 return;
             }
-            if (info.Length > AttachmentUploadHelper.MaxAttachmentBytes)
+            if (info.Length > EffectiveMaxAttachmentBytes)
             {
-                var maxMb = AttachmentUploadHelper.MaxAttachmentBytes / (1024 * 1024);
+                var maxMb = EffectiveMaxAttachmentMegabytes;
                 var err = AppLocalization.T(
-                    $"File exceeds {maxMb} MB limit ({AttachmentUploadHelper.FormatFileSize(info.Length)}): {info.Name}",
-                    $"文件超过 {maxMb} MB 限制（当前 {AttachmentUploadHelper.FormatFileSize(info.Length)}）：{info.Name}");
+                    $"File exceeds {maxMb} MB limit ({AttachmentUploadHelper.FormatFileSize(info.Length)}): {info.Name}. You can raise the limit in Settings.",
+                    $"文件超过 {maxMb} MB 限制（当前 {AttachmentUploadHelper.FormatFileSize(info.Length)}）：{info.Name}，可在设置中调大上限。");
                 ComposerError = err;
                 StatusBanner = err;
                 return;
             }
 
-            var bytes = File.ReadAllBytes(filePath);
+            ComposerError = null;
             var mime = AttachmentUploadHelper.GuessMimeType(info.Name);
             var kind = UserAttachmentExtractor.ClassifyKind(info.Name);
-            StageMemoryAttachment(info.Name, bytes, mime, kind);
+            Bitmap? thumb = null;
+            if (kind == AttachmentKind.Image && info.Length <= 25L * 1024 * 1024)
+            {
+                try
+                {
+                    using var fs = File.OpenRead(info.FullName);
+                    thumb = Bitmap.DecodeToWidth(fs, 72);
+                }
+                catch
+                {
+                    // Non-raster image (e.g. SVG) falls back to badge.
+                }
+            }
+
+            PendingAttachments.Add(new PendingAttachmentItem
+            {
+                Name = info.Name,
+                LocalFilePath = info.FullName,
+                FileSizeBytes = info.Length,
+                MimeType = mime,
+                Kind = kind,
+                Thumbnail = thumb
+            });
         }
         catch (Exception ex)
         {
@@ -1634,9 +1676,9 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     public void StageMemoryAttachment(string fileName, byte[] bytes, string? mimeType = null, AttachmentKind? kind = null)
     {
         if (bytes is not { Length: > 0 }) return;
-        if (bytes.Length > AttachmentUploadHelper.MaxAttachmentBytes)
+        if (bytes.Length > EffectiveMaxAttachmentBytes)
         {
-            var maxMb = AttachmentUploadHelper.MaxAttachmentBytes / (1024 * 1024);
+            var maxMb = EffectiveMaxAttachmentMegabytes;
             var err = AppLocalization.T(
                 $"Attachment exceeds {maxMb} MB limit: {fileName}",
                 $"附件超过 {maxMb} MB 限制：{fileName}");
@@ -1672,6 +1714,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         {
             Name = safeName,
             Bytes = bytes,
+            FileSizeBytes = bytes.Length,
             MimeType = resolvedMime,
             Kind = resolvedKind,
             Thumbnail = thumb
@@ -1873,8 +1916,12 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         for (var i = 0; i < items.Count; i++)
         {
             var item = items[i];
-            var base64 = Convert.ToBase64String(item.Bytes);
-            var dataUrl = $"data:{item.MimeType};base64,{base64}";
+            var rawBytes = await item.ReadBytesAsync();
+            var (base64, dataUrl) = await Task.Run(() =>
+            {
+                var b64 = Convert.ToBase64String(rawBytes);
+                return (b64, $"data:{item.MimeType};base64,{b64}");
+            });
 
             if (item.Kind == AttachmentKind.Image)
             {
@@ -1885,7 +1932,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                     bubbleAttachments.Add(new Attachment(
                         Id: $"{messageId}-up-img-{i}",
                         Name: item.Name,
-                        Uri: dataUrl,
+                        Uri: stagedPath ?? dataUrl,
                         MimeType: item.MimeType,
                         Kind: AttachmentKind.Image));
                     continue;
@@ -1904,7 +1951,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             bubbleAttachments.Add(new Attachment(
                 Id: $"{messageId}-up-file-{i}",
                 Name: item.Name,
-                Uri: resolvedPath ?? dataUrl,
+                Uri: resolvedPath ?? item.LocalFilePath ?? item.Name,
                 MimeType: item.MimeType,
                 Kind: item.Kind));
         }
@@ -3178,6 +3225,21 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
     [RelayCommand]
     private void SelectChineseLanguage() => SetLanguageMode(AppLanguageMode.Chinese);
+
+    [RelayCommand] private void SelectAttachmentLimit64() => SetAttachmentLimitMegabytes(64);
+    [RelayCommand] private void SelectAttachmentLimit128() => SetAttachmentLimitMegabytes(128);
+    [RelayCommand] private void SelectAttachmentLimit256() => SetAttachmentLimitMegabytes(256);
+    [RelayCommand] private void SelectAttachmentLimit512() => SetAttachmentLimitMegabytes(512);
+
+    private void SetAttachmentLimitMegabytes(int megabytes)
+    {
+        _settings.MaxAttachmentMegabytes = Math.Clamp(megabytes, 16, AttachmentUploadHelper.MaxConfigurableAttachmentMegabytes);
+        _cache.SaveSettings(_settings);
+        OnPropertyChanged(nameof(IsAttachmentLimit64));
+        OnPropertyChanged(nameof(IsAttachmentLimit128));
+        OnPropertyChanged(nameof(IsAttachmentLimit256));
+        OnPropertyChanged(nameof(IsAttachmentLimit512));
+    }
 
     [RelayCommand]
     private void SelectSystemTheme() => ApplyThemePreference("system", save: true);

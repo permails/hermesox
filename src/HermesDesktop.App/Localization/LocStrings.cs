@@ -91,6 +91,10 @@ public sealed class LocStrings : INotifyPropertyChanged
     public string Queue => L("Queue", "排队");
     public string Send => L("Send", "发送");
     public string AttachFilesTip => L("Attach image, video, or file (drag & drop or Ctrl+V screenshot supported)", "上传图片、视频或文件（支持拖拽文件或直接 Ctrl+V 粘贴截图）");
+    public string AttachmentLimitSectionTitle => L("Attachment & Video Upload Limit", "附件与视频上传大小限制");
+    public string AttachmentLimitHint => L(
+        "Default is 256 MB. Larger videos require more memory while encoding for upload.",
+        "默认上限为 256 MB；发送超大视频时会占用更多内存进行编码上传（实际最大允许大小亦受服务端配置限制）。");
     public string VoiceDictationTip => L("Voice to text (System IME voice typing Win+H)", "输入法语音转文字（调用系统语音输入 Win+H）");
     public string VoiceDictationFallbackNotice => L(
         "Place cursor in the input box and press Win+H (or your IME voice key) to start voice typing.",

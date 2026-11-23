@@ -919,6 +919,31 @@
 
             <Border Classes="card" Padding="16">
               <StackPanel Spacing="10">
+                <TextBlock Text="{Binding Loc.AttachmentLimitSectionTitle}" FontWeight="SemiBold" FontSize="14"/>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Button CornerRadius="4" Padding="12,6" BorderThickness="1" Content="64 MB"
+                          Background="{Binding IsAttachmentLimit64, Converter={x:Static conv:BoolToAccentBrushConverter.Instance}}"
+                          BorderBrush="{Binding IsAttachmentLimit64, Converter={x:Static conv:BoolToBorderBrushConverter.Instance}}"
+                          Command="{Binding SelectAttachmentLimit64Command}"/>
+                  <Button CornerRadius="4" Padding="12,6" BorderThickness="1" Content="128 MB"
+                          Background="{Binding IsAttachmentLimit128, Converter={x:Static conv:BoolToAccentBrushConverter.Instance}}"
+                          BorderBrush="{Binding IsAttachmentLimit128, Converter={x:Static conv:BoolToBorderBrushConverter.Instance}}"
+                          Command="{Binding SelectAttachmentLimit128Command}"/>
+                  <Button CornerRadius="4" Padding="12,6" BorderThickness="1" Content="256 MB"
+                          Background="{Binding IsAttachmentLimit256, Converter={x:Static conv:BoolToAccentBrushConverter.Instance}}"
+                          BorderBrush="{Binding IsAttachmentLimit256, Converter={x:Static conv:BoolToBorderBrushConverter.Instance}}"
+                          Command="{Binding SelectAttachmentLimit256Command}"/>
+                  <Button CornerRadius="4" Padding="12,6" BorderThickness="1" Content="512 MB"
+                          Background="{Binding IsAttachmentLimit512, Converter={x:Static conv:BoolToAccentBrushConverter.Instance}}"
+                          BorderBrush="{Binding IsAttachmentLimit512, Converter={x:Static conv:BoolToBorderBrushConverter.Instance}}"
+                          Command="{Binding SelectAttachmentLimit512Command}"/>
+                </StackPanel>
+                <TextBlock Text="{Binding Loc.AttachmentLimitHint}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}" TextWrapping="Wrap"/>
+              </StackPanel>
+            </Border>
+
+            <Border Classes="card" Padding="16">
+              <StackPanel Spacing="10">
                 <TextBlock Text="{Binding Loc.ProfilePersonalityTitle}" FontWeight="SemiBold" FontSize="14"/>
                 <TextBlock Text="{Binding ActiveProfileDisplayLabel}" FontSize="12.5" Foreground="{DynamicResource WinAccentTextBrush}"/>
                 <TextBlock Text="{Binding Loc.ProfilePersonalityDesc}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}" TextWrapping="Wrap"/>
