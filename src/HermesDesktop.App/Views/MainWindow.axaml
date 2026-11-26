@@ -234,10 +234,6 @@
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                   <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsRunningTurn}" Width="68" Height="4" Foreground="{DynamicResource WinAccentFillBrush}" VerticalAlignment="Center"/>
                   <Button Classes="subtle" Content="{Binding Loc.Stop}" IsVisible="{Binding IsRunningTurn}" Command="{Binding InterruptTurnCommand}"/>
-                  <Button Classes="subtle" Content="{Binding Loc.SelectAllTranscriptBtn}" FontSize="11.5" Padding="9,4"
-                          ToolTip.Tip="{Binding Loc.SelectAllTranscriptTip}"
-                          IsVisible="{Binding HasActiveSession}"
-                          Command="{Binding ToggleTranscriptSelectionModeCommand}"/>
                   <Button Classes="ghost" Content="×" FontSize="14" Padding="8,4"
                           Foreground="{DynamicResource WinErrorBannerTextBrush}"
                           ToolTip.Tip="{Binding Loc.DeleteSessionTip}"
@@ -296,14 +292,9 @@
                                                         FileClickCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenPreviewFileCommand}"
                                                         DownloadCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).DownloadRemoteFileCommand}"/>
                           <SelectableTextBlock IsVisible="{Binding HasVisibleContent}" Text="{Binding Content}" TextWrapping="Wrap" FontSize="13.5" LineHeight="20" Foreground="{DynamicResource WinTextPrimaryBrush}"/>
-                          <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
-                            <Button Classes="ghost" Content="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.SelectTextBtn}"
-                                    FontSize="10" Padding="4,1" Foreground="{DynamicResource WinTextTertiaryBrush}"
-                                    IsVisible="{Binding HasVisibleContent}"
-                                    Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenMessageSelectModalCommand}"
-                                    CommandParameter="{Binding}"/>
+                          <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
                             <Button Classes="ghost" Content="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.CopyBtn}"
-                                    FontSize="10" Padding="4,1" Foreground="{DynamicResource WinTextTertiaryBrush}"
+                                    FontSize="10.5" Padding="5,1" Foreground="{DynamicResource WinTextTertiaryBrush}"
                                     IsVisible="{Binding HasVisibleContent}"
                                     Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).CopyMessageCommand}"
                                     CommandParameter="{Binding}"/>
@@ -383,18 +374,12 @@
                               <TextBlock Text="{Binding Timestamp}" FontSize="11" Foreground="{DynamicResource WinTextTertiaryBrush}" VerticalAlignment="Center"
                                          IsVisible="{Binding Timestamp, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
                             </StackPanel>
-                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                              <Button Classes="ghost" Content="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.SelectTextBtn}"
-                                      FontSize="11" Padding="6,2" Foreground="{DynamicResource WinTextTertiaryBrush}"
-                                      IsVisible="{Binding HasVisibleContent}"
-                                      Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenMessageSelectModalCommand}"
-                                      CommandParameter="{Binding}"/>
-                              <Button Classes="ghost" Content="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.CopyBtn}"
-                                      FontSize="11" Padding="6,2" Foreground="{DynamicResource WinTextTertiaryBrush}"
-                                      IsVisible="{Binding HasVisibleContent}"
-                                      Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).CopyMessageCommand}"
-                                      CommandParameter="{Binding}"/>
-                            </StackPanel>
+                            <Button Grid.Column="1" Classes="ghost" Content="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.CopyBtn}"
+                                    FontSize="11" Padding="6,2" Foreground="{DynamicResource WinTextTertiaryBrush}"
+                                    VerticalAlignment="Center"
+                                    IsVisible="{Binding HasVisibleContent}"
+                                    Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).CopyMessageCommand}"
+                                    CommandParameter="{Binding}"/>
                           </Grid>
 
                           <StackPanel IsVisible="{Binding HasReasoning}" Spacing="6">

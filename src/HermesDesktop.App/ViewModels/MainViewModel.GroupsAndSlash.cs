@@ -184,7 +184,10 @@ public sealed partial class MainViewModel
 
     private static string ExtractCopyableMessageText(MessageItemViewModel item)
     {
-        if (!string.IsNullOrWhiteSpace(item.Content)) return item.Content;
+        if (!string.IsNullOrWhiteSpace(item.Content))
+        {
+            return StripThinkingTags(item.Content);
+        }
         if (item.Tool is not null)
         {
             var sb = new StringBuilder();
@@ -193,7 +196,7 @@ public sealed partial class MainViewModel
             if (!string.IsNullOrWhiteSpace(item.Tool.Output)) sb.AppendLine(item.Tool.Output);
             return sb.ToString().Trim();
         }
-        return item.Reasoning ?? "";
+        return "";
     }
 
     private string BuildFullTranscriptPlainText()
@@ -207,16 +210,16 @@ public sealed partial class MainViewModel
                 if (sb.Length > 0) sb.AppendLine().AppendLine();
                 var ts = string.IsNullOrWhiteSpace(item.Timestamp) ? "" : $" ({item.Timestamp})";
                 sb.AppendLine($"[You{ts}]");
-                if (item.HasVisibleContent) sb.Append(item.Content.TrimEnd());
+                if (item.HasVisibleContent) sb.Append(StripThinkingTags(item.Content).TrimEnd());
                 if (item.HasAttachments)
                 {
                     if (item.HasVisibleContent) sb.AppendLine();
                     sb.Append(string.Join(", ", item.Attachments.Select(a => $"[Attachment: {a.Name}]")));
                 }
             }
-            else if (item.IsAssistantBubble || item.IsReasoningOnly)
+            else if (item.IsElevatedAssistantReply)
             {
-                var body = !string.IsNullOrWhiteSpace(item.Content) ? item.Content : item.Reasoning;
+                var body = StripThinkingTags(item.Content);
                 if (string.IsNullOrWhiteSpace(body) && !item.HasAttachments) continue;
                 if (sb.Length > 0) sb.AppendLine().AppendLine();
                 var ts = string.IsNullOrWhiteSpace(item.Timestamp) ? "" : $" ({item.Timestamp})";
@@ -240,6 +243,17 @@ public sealed partial class MainViewModel
             }
         }
         return sb.ToString();
+    }
+
+    private static string StripThinkingTags(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+        var cleaned = System.Text.RegularExpressions.Regex.Replace(
+            raw,
+            @"<(think|thinking|thought|reasoning)>[\s\S]*?</\1>",
+            "",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return cleaned.Trim();
     }
 
     // ---- 3. Rename Session Modal & Command ----
