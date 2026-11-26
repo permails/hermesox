@@ -529,6 +529,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     partial void OnConnectionPhaseChanged(ConnectionPhase value)
     {
         OnPropertyChanged(nameof(IsConnected));
+        OnPropertyChanged(nameof(CanCloseConnectOverlay));
         OnPropertyChanged(nameof(IsServerMaintenanceIdle));
     }
 
@@ -668,12 +669,22 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private void OpenConnectPanel()
     {
         ConnectError = null;
+        OpenedConnectFromStartupGate = false;
         ShowConnectOverlay = true;
     }
 
     [RelayCommand]
     private void CloseConnectPanel()
     {
+        if (OpenedConnectFromStartupGate)
+        {
+            ShowConnectOverlay = false;
+            OpenedConnectFromStartupGate = false;
+            IsStartupGateReady = IsConnected && _activeDashboard is not null;
+            IsStartupGateVisible = true;
+            RebuildStartupDashboardOptions();
+            return;
+        }
         if (IsConnected) ShowConnectOverlay = false;
     }
 
@@ -786,6 +797,17 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
             EditingDashboardId = null;
             ShowConnectOverlay = false;
+            if (OpenedConnectFromStartupGate)
+            {
+                OpenedConnectFromStartupGate = false;
+                _startupGateDashboard = dashboard;
+                StartupGateServerName = dashboard.Label;
+                StartupGateServerUrl = dashboard.NormalizedUrl;
+                StartupGateError = null;
+                IsStartupGateReady = true;
+                IsStartupGateVisible = true;
+                RebuildStartupDashboardOptions();
+            }
         }
         catch (Exception ex)
         {

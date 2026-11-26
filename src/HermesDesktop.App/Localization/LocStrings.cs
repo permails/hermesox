@@ -313,10 +313,11 @@ public sealed class LocStrings : INotifyPropertyChanged
 
     // Startup Connection Buffer Gate
     public string StartupConnectingTitle => L("Connecting…", "正在连接工作台…");
-    public string StartupReadyTitle => L("Ready", "连接已就绪");
+    public string StartupReadyTitle => L("Ready — Click workspace to enter", "已就绪 · 点击工作台进入");
     public string StartupErrorTitle => L("Connection Failed", "连接失败");
-    public string StartupSelectWorkspaceLabel => L("Select Workspace", "选择工作台");
-    public string StartupEnterBtn => L("Enter Workspace", "进入");
+    public string StartupCardReadyHint => L("Click to enter", "点击进入");
+    public string StartupCardConnectingHint => L("Connecting…", "连接中…");
+    public string StartupCardSwitchHint => L("Click to connect", "点击连接");
     public string StartupRetryBtn => L("Retry", "重试");
     public string StartupSwitchServerBtn => L("Manage Servers", "管理服务器");
     public string SelectTextBtn => L("Select", "框选");

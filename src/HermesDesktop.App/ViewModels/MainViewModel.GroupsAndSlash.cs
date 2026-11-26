@@ -3,6 +3,7 @@ using System.Text;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using HermesDesktop.App.Localization;
 using HermesDesktop.Core.Localization;
 using HermesDesktop.Core.Models;
 using HermesDesktop.Core.Rpc;
@@ -60,15 +61,24 @@ public sealed class GroupEventItemViewModel
         : "";
 }
 
-public sealed partial class StartupDashboardOptionViewModel(SavedDashboard dashboard, bool isSelected, bool isConnectedHere)
-    : ObservableObject
+public sealed partial class StartupDashboardOptionViewModel(
+    SavedDashboard dashboard,
+    bool isSelected,
+    bool isConnectedHere,
+    bool isBusyHere) : ObservableObject
 {
     public SavedDashboard Dashboard { get; } = dashboard;
     public string Label => Dashboard.Label;
-    public string Url => Dashboard.NormalizedUrl;
 
     [ObservableProperty] private bool _isSelected = isSelected;
     [ObservableProperty] private bool _isConnectedHere = isConnectedHere;
+    [ObservableProperty] private bool _isBusyHere = isBusyHere;
+
+    public string StatusHint => IsBusyHere
+        ? LocStrings.Instance.StartupCardConnectingHint
+        : IsConnectedHere
+            ? LocStrings.Instance.StartupCardReadyHint
+            : LocStrings.Instance.StartupCardSwitchHint;
 }
 
 public sealed partial class MainViewModel
@@ -93,7 +103,12 @@ public sealed partial class MainViewModel
     [ObservableProperty] private string _startupGateServerName = "";
     [ObservableProperty] private string _startupGateServerUrl = "";
     [ObservableProperty] private string? _startupGateError;
+    [ObservableProperty] private bool _openedConnectFromStartupGate;
     private SavedDashboard? _startupGateDashboard;
+
+    public bool CanCloseConnectOverlay => IsConnected || OpenedConnectFromStartupGate;
+
+    partial void OnOpenedConnectFromStartupGateChanged(bool value) => OnPropertyChanged(nameof(CanCloseConnectOverlay));
 
     partial void OnIsStartupGateVisibleChanged(bool value)
     {
@@ -105,7 +120,6 @@ public sealed partial class MainViewModel
     {
         OnPropertyChanged(nameof(StartupGateHeadline));
         OnPropertyChanged(nameof(IsStartupGateBuffering));
-        OnPropertyChanged(nameof(StartupEnterButtonLabel));
         RebuildStartupDashboardOptions();
     }
 
@@ -119,13 +133,9 @@ public sealed partial class MainViewModel
 
     public bool HasStartupGateError => !string.IsNullOrWhiteSpace(StartupGateError);
     public bool IsStartupGateBuffering => !IsStartupGateReady && !HasStartupGateError;
-    public bool HasMultipleStartupDashboards => StartupDashboards.Count > 1;
     public string StartupGateHeadline => HasStartupGateError
         ? Loc.StartupErrorTitle
         : IsStartupGateReady ? Loc.StartupReadyTitle : Loc.StartupConnectingTitle;
-    public string StartupEnterButtonLabel => string.IsNullOrWhiteSpace(StartupGateServerName)
-        ? Loc.StartupEnterBtn
-        : $"{Loc.StartupEnterBtn} {StartupGateServerName}";
 
     private void RebuildStartupDashboardOptions()
     {
@@ -134,25 +144,21 @@ public sealed partial class MainViewModel
         foreach (var d in SavedDashboards)
         {
             var isSel = selectedId.HasValue && d.Id == selectedId.Value;
-            var isConn = IsConnected && _activeDashboard?.Id == d.Id;
-            StartupDashboards.Add(new StartupDashboardOptionViewModel(d, isSel, isConn));
+            var isBusy = isSel && IsConnecting && IsStartupGateBuffering;
+            var isConn = !isBusy && IsConnected && _activeDashboard?.Id == d.Id;
+            StartupDashboards.Add(new StartupDashboardOptionViewModel(d, isSel, isConn, isBusy));
         }
-        OnPropertyChanged(nameof(HasMultipleStartupDashboards));
-        OnPropertyChanged(nameof(StartupEnterButtonLabel));
     }
 
     [RelayCommand]
     private async Task SelectStartupDashboardAsync(StartupDashboardOptionViewModel? option)
     {
         if (option is null) return;
-        if (_activeDashboard?.Id == option.Dashboard.Id && IsConnected)
+        if (IsConnecting) return;
+
+        if (_activeDashboard?.Id == option.Dashboard.Id && IsConnected && IsStartupGateReady)
         {
-            _startupGateDashboard = option.Dashboard;
-            StartupGateServerName = option.Dashboard.Label;
-            StartupGateServerUrl = option.Dashboard.NormalizedUrl;
-            StartupGateError = null;
-            IsStartupGateReady = true;
-            RebuildStartupDashboardOptions();
+            IsStartupGateVisible = false;
             return;
         }
         await TryReconnectSavedAsync(option.Dashboard, fromStartupGate: true);
@@ -161,7 +167,7 @@ public sealed partial class MainViewModel
     [RelayCommand]
     public void EnterWorkspace()
     {
-        if (!IsStartupGateReady) return;
+        if (!IsStartupGateReady || IsConnecting) return;
         IsStartupGateVisible = false;
     }
 
@@ -181,6 +187,7 @@ public sealed partial class MainViewModel
     private void OpenConnectFromStartupGate()
     {
         var dash = _startupGateDashboard ?? SessionCatalogHelper.ResolveStartupDashboard(SavedDashboards, _settings.ActiveDashboardId);
+        OpenedConnectFromStartupGate = true;
         IsStartupGateVisible = false;
         if (dash is not null)
         {
