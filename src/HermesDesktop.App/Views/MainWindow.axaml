@@ -1864,8 +1864,8 @@
       </Border>
     </Border>
 
-    <!-- Connect / Saved Dashboards Overlay (Opaque Backdrop Cover when not yet connected) -->
-    <Border Grid.RowSpan="3" IsVisible="{Binding ShowConnectOverlay}" Background="{DynamicResource WinMicaBackdropBrush}">
+    <!-- Connect / Saved Dashboards Overlay (100% Solid Cover when configuring servers) -->
+    <Border Grid.RowSpan="3" IsVisible="{Binding ShowConnectOverlay}" Background="{DynamicResource WinLayerFillBrush}">
       <Border Classes="dialog" Width="780" Height="600" ClipToBounds="True"
               HorizontalAlignment="Center" VerticalAlignment="Center">
         <Grid RowDefinitions="Auto,*,Auto" Height="600">
@@ -2062,54 +2062,76 @@
       </Border>
     </Border>
 
-    <!-- Full-Cover Launch & Connection Buffer Gate -->
-    <Border Grid.RowSpan="3" IsVisible="{Binding IsStartupGateVisible}" Background="{DynamicResource WinMicaBackdropBrush}">
-      <Border Classes="dialog" Width="480" Padding="32,28" HorizontalAlignment="Center" VerticalAlignment="Center">
-        <StackPanel Spacing="18">
-          <!-- Brand Header -->
-          <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center">
-            <Border Width="40" Height="40" CornerRadius="10" Background="{DynamicResource WinAccentFillBrush}">
-              <TextBlock Text="H" FontWeight="Bold" FontSize="20" Foreground="{DynamicResource WinAccentForegroundBrush}"
+    <!-- Full-Cover Launch & Multi-Workspace Connection Gate (100% Opaque Cover) -->
+    <Border Grid.RowSpan="3" IsVisible="{Binding IsStartupGateVisible}" Background="{DynamicResource WinLayerFillBrush}">
+      <Border Classes="dialog" Width="460" Padding="28,26" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <StackPanel Spacing="16">
+          <!-- Compact Brand & Status Row -->
+          <Grid ColumnDefinitions="Auto,*,Auto">
+            <Border Grid.Column="0" Width="38" Height="38" CornerRadius="10" Background="{DynamicResource WinAccentFillBrush}" Margin="0,0,12,0">
+              <TextBlock Text="H" FontWeight="Bold" FontSize="19" Foreground="{DynamicResource WinAccentForegroundBrush}"
                          HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
-            <StackPanel VerticalAlignment="Center" Spacing="1">
-              <TextBlock Text="Hermes Desktop" FontSize="19" FontWeight="SemiBold" Foreground="{DynamicResource WinTextPrimaryBrush}"/>
-              <TextBlock Text="{Binding StartupGateServerName}" FontSize="12" Foreground="{DynamicResource WinAccentTextBrush}" FontWeight="Medium"/>
+            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+              <TextBlock Text="Hermes Desktop" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource WinTextPrimaryBrush}"/>
+              <TextBlock Text="{Binding StartupGateHeadline}" FontSize="12"
+                         Foreground="{DynamicResource WinAccentTextBrush}"
+                         FontWeight="Medium"/>
             </StackPanel>
-          </StackPanel>
+          </Grid>
 
-          <Border Padding="12,8" CornerRadius="6" Background="{DynamicResource WinCardSecondaryBrush}"
-                  BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="1">
-            <TextBlock Text="{Binding StartupGateServerUrl}" FontFamily="{StaticResource WinMonoFontFamily}" FontSize="12"
-                       Foreground="{DynamicResource WinTextSecondaryBrush}" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-          </Border>
-
-          <StackPanel Spacing="8">
-            <TextBlock Text="{Binding StartupGateHeadline}" FontSize="15.5" FontWeight="SemiBold"
-                       Foreground="{DynamicResource WinTextPrimaryBrush}" HorizontalAlignment="Center"/>
-            <TextBlock Text="{Binding StartupGateDescription}" FontSize="12.5" TextWrapping="Wrap" TextAlignment="Center"
-                       Foreground="{DynamicResource WinTextSecondaryBrush}" IsVisible="{Binding !HasStartupGateError}"/>
-          </StackPanel>
-
-          <!-- Buffering Progress Bar -->
+          <!-- Slim Buffering Progress Bar -->
           <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsStartupGateBuffering}"
-                       Height="5" CornerRadius="2.5" Foreground="{DynamicResource WinAccentFillBrush}"/>
+                       Height="4" CornerRadius="2" Foreground="{DynamicResource WinAccentFillBrush}"/>
+
+          <!-- Multi-Workspace / Server Selector Cards -->
+          <StackPanel Spacing="6">
+            <TextBlock Text="{Binding Loc.StartupSelectWorkspaceLabel}"
+                       IsVisible="{Binding HasMultipleStartupDashboards}"
+                       FontSize="11.5" FontWeight="Medium" Foreground="{DynamicResource WinTextTertiaryBrush}"/>
+            <ScrollViewer MaxHeight="220" VerticalScrollBarVisibility="Auto">
+              <ItemsControl ItemsSource="{Binding StartupDashboards}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:StartupDashboardOptionViewModel">
+                    <Button Margin="0,0,0,6" Padding="12,10" CornerRadius="6" BorderThickness="1"
+                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                            Background="{Binding IsSelected, Converter={x:Static conv:BoolToAccentBrushConverter.Instance}}"
+                            BorderBrush="{Binding IsSelected, Converter={x:Static conv:BoolToBorderBrushConverter.Instance}}"
+                            Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectStartupDashboardCommand}"
+                            CommandParameter="{Binding}">
+                      <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel Grid.Column="0" Spacing="2">
+                          <TextBlock Text="{Binding Label}" FontSize="13.5" FontWeight="SemiBold"
+                                     Foreground="{DynamicResource WinTextPrimaryBrush}" TextTrimming="CharacterEllipsis"/>
+                          <TextBlock Text="{Binding Url}" FontSize="11" FontFamily="{StaticResource WinMonoFontFamily}"
+                                     Foreground="{DynamicResource WinTextTertiaryBrush}" TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+                        <Ellipse Grid.Column="1" Width="8" Height="8" Fill="#10B981"
+                                 IsVisible="{Binding IsConnectedHere}" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                      </Grid>
+                    </Button>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+          </StackPanel>
 
           <!-- Error Banner when Connection Fails -->
-          <Border IsVisible="{Binding HasStartupGateError}" Padding="12,10" CornerRadius="6"
+          <Border IsVisible="{Binding HasStartupGateError}" Padding="10,8" CornerRadius="6"
                   Background="{DynamicResource WinErrorBannerFillBrush}"
                   BorderBrush="{DynamicResource WinErrorBannerStrokeBrush}" BorderThickness="1">
             <TextBlock Text="{Binding StartupGateError}" FontSize="12" TextWrapping="Wrap"
                        Foreground="{DynamicResource WinErrorBannerTextBrush}"/>
           </Border>
 
-          <!-- Ready Primary Entry CTA -->
-          <StackPanel Spacing="10">
-            <Button Classes="accent" Content="{Binding Loc.StartupEnterBtn}"
-                    IsVisible="{Binding IsStartupGateReady}"
+          <!-- Entry CTA & Server Management -->
+          <StackPanel Spacing="8">
+            <Button Classes="accent" Content="{Binding StartupEnterButtonLabel}"
+                    IsVisible="{Binding !HasStartupGateError}"
+                    IsEnabled="{Binding IsStartupGateReady}"
                     Command="{Binding EnterWorkspaceCommand}"
                     HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
-                    FontSize="14" FontWeight="SemiBold" Padding="20,10"/>
+                    FontSize="14" FontWeight="SemiBold" Padding="18,10"/>
 
             <Grid ColumnDefinitions="*,*" IsVisible="{Binding HasStartupGateError}">
               <Button Grid.Column="0" Classes="accent" Content="{Binding Loc.StartupRetryBtn}"

@@ -481,6 +481,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         {
             OnPropertyChanged(nameof(HasSavedDashboards));
             OnPropertyChanged(nameof(HasNoSavedDashboards));
+            RebuildStartupDashboardOptions();
         };
         PendingAttachments.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasPendingAttachments));
 
@@ -494,6 +495,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             StartupGateError = null;
             ShowConnectOverlay = false;
             IsStartupGateVisible = true;
+            RebuildStartupDashboardOptions();
             _ = TryReconnectSavedAsync(startupDashboard, fromStartupGate: true);
         }
     }
@@ -838,6 +840,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             StartupGateError = null;
             IsStartupGateReady = false;
             IsStartupGateVisible = true;
+            RebuildStartupDashboardOptions();
         }
 
         var secrets = _vault.LoadSecrets(dashboard.Id);

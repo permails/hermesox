@@ -312,18 +312,13 @@ public sealed class LocStrings : INotifyPropertyChanged
     public string LocalLogsLabel => L("Local Logs Directory", "本地日志目录");
 
     // Startup Connection Buffer Gate
-    public string StartupConnectingTitle => L("Connecting to Hermes Gateway…", "正在连接 Hermes 服务端…");
-    public string StartupReadyTitle => L("Connected & Ready", "连接已就绪");
+    public string StartupConnectingTitle => L("Connecting…", "正在连接工作台…");
+    public string StartupReadyTitle => L("Ready", "连接已就绪");
     public string StartupErrorTitle => L("Connection Failed", "连接失败");
-    public string StartupConnectingDesc => L(
-        "Verifying credentials and syncing your sessions, bots, and local cache…",
-        "正在校验登录凭据并同步会话列表、智能体与本地缓存…");
-    public string StartupReadyDesc => L(
-        "Everything is synced and ready. Click below to enter the workspace.",
-        "会话与本地缓存已同步完成，点击下方按钮进入工作台。");
-    public string StartupEnterBtn => L("Enter Workspace", "进入 Hermes 工作台");
-    public string StartupRetryBtn => L("Retry Connection", "重试连接");
-    public string StartupSwitchServerBtn => L("Switch / Edit Server", "切换或编辑服务器");
+    public string StartupSelectWorkspaceLabel => L("Select Workspace", "选择工作台");
+    public string StartupEnterBtn => L("Enter Workspace", "进入");
+    public string StartupRetryBtn => L("Retry", "重试");
+    public string StartupSwitchServerBtn => L("Manage Servers", "管理服务器");
     public string SelectTextBtn => L("Select", "框选");
     public string SelectAllBtn => L("Select All", "全选");
     public string BackToChatViewBtn => L("Back to Chat View", "返回排版视图");

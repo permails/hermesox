@@ -60,6 +60,17 @@ public sealed class GroupEventItemViewModel
         : "";
 }
 
+public sealed partial class StartupDashboardOptionViewModel(SavedDashboard dashboard, bool isSelected, bool isConnectedHere)
+    : ObservableObject
+{
+    public SavedDashboard Dashboard { get; } = dashboard;
+    public string Label => Dashboard.Label;
+    public string Url => Dashboard.NormalizedUrl;
+
+    [ObservableProperty] private bool _isSelected = isSelected;
+    [ObservableProperty] private bool _isConnectedHere = isConnectedHere;
+}
+
 public sealed partial class MainViewModel
 {
     public event Action? TranscriptSelectionFocusAndSelectRequested;
@@ -75,6 +86,8 @@ public sealed partial class MainViewModel
 
     partial void OnIsGlobalCopiedFeedbackChanged(bool value) => OnPropertyChanged(nameof(GlobalCopyButtonText));
 
+    public ObservableCollection<StartupDashboardOptionViewModel> StartupDashboards { get; } = [];
+
     [ObservableProperty] private bool _isStartupGateVisible;
     [ObservableProperty] private bool _isStartupGateReady;
     [ObservableProperty] private string _startupGateServerName = "";
@@ -82,29 +95,68 @@ public sealed partial class MainViewModel
     [ObservableProperty] private string? _startupGateError;
     private SavedDashboard? _startupGateDashboard;
 
-    partial void OnIsStartupGateVisibleChanged(bool value) => OnPropertyChanged(nameof(IsHtmlPreviewWebViewVisible));
+    partial void OnIsStartupGateVisibleChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsHtmlPreviewWebViewVisible));
+        if (value) RebuildStartupDashboardOptions();
+    }
+
     partial void OnIsStartupGateReadyChanged(bool value)
     {
         OnPropertyChanged(nameof(StartupGateHeadline));
-        OnPropertyChanged(nameof(StartupGateDescription));
         OnPropertyChanged(nameof(IsStartupGateBuffering));
+        OnPropertyChanged(nameof(StartupEnterButtonLabel));
+        RebuildStartupDashboardOptions();
     }
+
     partial void OnStartupGateErrorChanged(string? value)
     {
         OnPropertyChanged(nameof(HasStartupGateError));
         OnPropertyChanged(nameof(StartupGateHeadline));
-        OnPropertyChanged(nameof(StartupGateDescription));
         OnPropertyChanged(nameof(IsStartupGateBuffering));
+        RebuildStartupDashboardOptions();
     }
 
     public bool HasStartupGateError => !string.IsNullOrWhiteSpace(StartupGateError);
     public bool IsStartupGateBuffering => !IsStartupGateReady && !HasStartupGateError;
+    public bool HasMultipleStartupDashboards => StartupDashboards.Count > 1;
     public string StartupGateHeadline => HasStartupGateError
         ? Loc.StartupErrorTitle
         : IsStartupGateReady ? Loc.StartupReadyTitle : Loc.StartupConnectingTitle;
-    public string StartupGateDescription => HasStartupGateError
-        ? (StartupGateError ?? "")
-        : IsStartupGateReady ? Loc.StartupReadyDesc : Loc.StartupConnectingDesc;
+    public string StartupEnterButtonLabel => string.IsNullOrWhiteSpace(StartupGateServerName)
+        ? Loc.StartupEnterBtn
+        : $"{Loc.StartupEnterBtn} {StartupGateServerName}";
+
+    private void RebuildStartupDashboardOptions()
+    {
+        var selectedId = _startupGateDashboard?.Id ?? _activeDashboard?.Id ?? _settings.ActiveDashboardId;
+        StartupDashboards.Clear();
+        foreach (var d in SavedDashboards)
+        {
+            var isSel = selectedId.HasValue && d.Id == selectedId.Value;
+            var isConn = IsConnected && _activeDashboard?.Id == d.Id;
+            StartupDashboards.Add(new StartupDashboardOptionViewModel(d, isSel, isConn));
+        }
+        OnPropertyChanged(nameof(HasMultipleStartupDashboards));
+        OnPropertyChanged(nameof(StartupEnterButtonLabel));
+    }
+
+    [RelayCommand]
+    private async Task SelectStartupDashboardAsync(StartupDashboardOptionViewModel? option)
+    {
+        if (option is null) return;
+        if (_activeDashboard?.Id == option.Dashboard.Id && IsConnected)
+        {
+            _startupGateDashboard = option.Dashboard;
+            StartupGateServerName = option.Dashboard.Label;
+            StartupGateServerUrl = option.Dashboard.NormalizedUrl;
+            StartupGateError = null;
+            IsStartupGateReady = true;
+            RebuildStartupDashboardOptions();
+            return;
+        }
+        await TryReconnectSavedAsync(option.Dashboard, fromStartupGate: true);
+    }
 
     [RelayCommand]
     public void EnterWorkspace()
