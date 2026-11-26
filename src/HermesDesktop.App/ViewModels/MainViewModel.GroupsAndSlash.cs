@@ -1530,6 +1530,8 @@ public sealed partial class MainViewModel
     [ObservableProperty] private string _soulEditorProviderInput = "";
     [ObservableProperty] private string _soulEditorModelInput = "";
     [ObservableProperty] private string _soulFirstBotPresetSummary = "";
+    [ObservableProperty] private string _soulFirstBotPresetModelLabel = "";
+    [ObservableProperty] private string _soulFirstBotPresetProviderBadge = "";
     [ObservableProperty] private string _botProvidersStatusSummary = "";
     [ObservableProperty] private bool _isLoadingBotModels;
     [ObservableProperty] private string _soulProviderApiKeyInput = "";
@@ -1559,53 +1561,95 @@ public sealed partial class MainViewModel
 
     public bool HasAnyAvailableModelProviders => AvailableModelProviders.Count > 0;
     public bool HasModelsForSelectedProvider => AvailableModelsForSelectedProvider.Count > 0;
-    public bool ShowBotDropdownModelPickers => SoulUseCustomProviderModel && !SoulManualProviderInput && AvailableModelProviders.Count > 0;
+    public bool ShowModelModeSwitcher => IsCreatingSoul;
+    public bool ShowDefaultModelSummaryCard => IsCreatingSoul && !SoulUseCustomProviderModel;
+    public bool ShowCustomModelConfigPanel => !IsCreatingSoul || SoulUseCustomProviderModel;
+    public bool ShowManualToggleButton => ShowCustomModelConfigPanel && HasAnyAvailableModelProviders;
+    public bool ShowBotDropdownModelPickers => ShowCustomModelConfigPanel && !SoulManualProviderInput && AvailableModelProviders.Count > 0;
     public bool ShowBotDropdownModelBox => ShowBotDropdownModelPickers && HasModelsForSelectedProvider;
     public bool ShowBotCustomModelFallbackBox => ShowBotDropdownModelPickers && !HasModelsForSelectedProvider;
-    public bool ShowBotManualModelInputs => SoulUseCustomProviderModel && (SoulManualProviderInput || AvailableModelProviders.Count == 0);
+    public bool ShowBotManualModelInputs => ShowCustomModelConfigPanel && (SoulManualProviderInput || AvailableModelProviders.Count == 0);
     public bool ShowInlineProviderApiKeySetup =>
-        SoulUseCustomProviderModel
-        && !SoulManualProviderInput
-        && SelectedModelProviderOption is { IsConfigured: false, EnvVarName: { Length: > 0 } };
-    public string SelectedProviderApiKeyPrompt => SelectedModelProviderOption is { EnvVarName: { Length: > 0 } env }
-        ? AppLocalization.T(
-            $"Server has no saved key for {SelectedModelProviderOption.DisplayName} ({env}). Enter an API key to save to Hermes & load models:",
-            $"服务端尚未配置 {SelectedModelProviderOption.DisplayName}（{env}），粘贴 API Key 保存到服务端后即可拉取并选择模型：")
-        : "";
-    public string SaveProviderKeyBtnLabel => AppLocalization.T("Save Key & Refresh", "保存到服务端并刷新");
+        ShowBotDropdownModelPickers
+        && SelectedModelProviderOption is { IsConfigured: false, EnvVarName: { Length: > 0 } } sel
+        && !_providersWithSavedKey.Contains(sel.Slug);
 
-    partial void OnSoulUseCustomProviderModelChanged(bool value)
+    public string ManualInputToggleLabel => SoulManualProviderInput
+        ? AppLocalization.T("Select from list", "返回列表选择")
+        : AppLocalization.T("Enter ID manually", "手动填写标识");
+
+    public string SoulProviderApiKeyWatermark => SelectedModelProviderOption?.EnvVarName is { Length: > 0 } env
+        ? AppLocalization.T($"Paste {env}…", $"粘贴 {env} 密钥…")
+        : "sk-... / AIza...";
+
+    public string SelectedProviderApiKeyPrompt => SelectedModelProviderOption is { } opt
+        ? AppLocalization.T(
+            $"Configure {opt.DisplayName} API key to load available models",
+            $"填写 {opt.DisplayName} 密钥并验证后，自动加载可用模型")
+        : "";
+
+    public string SaveProviderKeyBtnLabel => AppLocalization.T("Verify & Save", "验证并保存");
+
+    private readonly HashSet<string> _providersWithSavedKey = new(StringComparer.OrdinalIgnoreCase);
+
+    private void RaiseBotModelVisibilityChanged()
     {
+        OnPropertyChanged(nameof(HasAnyAvailableModelProviders));
+        OnPropertyChanged(nameof(HasModelsForSelectedProvider));
+        OnPropertyChanged(nameof(ShowModelModeSwitcher));
+        OnPropertyChanged(nameof(ShowDefaultModelSummaryCard));
+        OnPropertyChanged(nameof(ShowCustomModelConfigPanel));
+        OnPropertyChanged(nameof(ShowManualToggleButton));
         OnPropertyChanged(nameof(ShowBotDropdownModelPickers));
         OnPropertyChanged(nameof(ShowBotDropdownModelBox));
         OnPropertyChanged(nameof(ShowBotCustomModelFallbackBox));
         OnPropertyChanged(nameof(ShowBotManualModelInputs));
         OnPropertyChanged(nameof(ShowInlineProviderApiKeySetup));
+        OnPropertyChanged(nameof(ManualInputToggleLabel));
+        OnPropertyChanged(nameof(SoulProviderApiKeyWatermark));
+        OnPropertyChanged(nameof(SelectedProviderApiKeyPrompt));
+    }
+
+    [RelayCommand]
+    private void ToggleManualProviderInput()
+    {
+        SoulManualProviderInput = !SoulManualProviderInput;
+    }
+
+    partial void OnSoulUseCustomProviderModelChanged(bool value)
+    {
+        RaiseBotModelVisibilityChanged();
     }
 
     partial void OnSoulManualProviderInputChanged(bool value)
     {
-        OnPropertyChanged(nameof(ShowBotDropdownModelPickers));
-        OnPropertyChanged(nameof(ShowBotDropdownModelBox));
-        OnPropertyChanged(nameof(ShowBotCustomModelFallbackBox));
-        OnPropertyChanged(nameof(ShowBotManualModelInputs));
-        OnPropertyChanged(nameof(ShowInlineProviderApiKeySetup));
+        if (value && !SoulUseCustomProviderModel)
+        {
+            SoulUseCustomProviderModel = true;
+        }
+        RaiseBotModelVisibilityChanged();
     }
 
     partial void OnSelectedModelProviderOptionChanged(ModelProviderOption? value)
     {
         SoulProviderApiKeyFeedback = "";
-        OnPropertyChanged(nameof(ShowInlineProviderApiKeySetup));
-        OnPropertyChanged(nameof(SelectedProviderApiKeyPrompt));
 
-        if (value is null) return;
+        if (value is null)
+        {
+            RaiseBotModelVisibilityChanged();
+            return;
+        }
+
+        if (!_syncingProviderSelection)
+        {
+            SoulUseCustomProviderModel = true;
+        }
         if (!SoulManualProviderInput)
         {
             SoulEditorProviderInput = value.Slug;
         }
 
-        // Preserve target model across Clear() because two-way ComboBox.SelectedItem resets on Clear()
-        var previousModel = SoulEditorModelInput;
+        var previousModel = _syncingProviderSelection ? SoulEditorModelInput : "";
 
         AvailableModelsForSelectedProvider.Clear();
         foreach (var m in value.Models)
@@ -1651,6 +1695,7 @@ public sealed partial class MainViewModel
         OnPropertyChanged(nameof(ShowBotDropdownModelBox));
         OnPropertyChanged(nameof(ShowBotCustomModelFallbackBox));
         OnPropertyChanged(nameof(SoulEditorModelInput));
+        RaiseBotModelVisibilityChanged();
     }
 
     [RelayCommand]
@@ -1666,16 +1711,22 @@ public sealed partial class MainViewModel
 
         IsSavingProviderApiKey = true;
         SoulProviderApiKeyFeedback = AppLocalization.T("Saving API key to server...", "正在保存密钥到服务端...");
+        var savedSlug = SelectedModelProviderOption.Slug;
         try
         {
             await _restClient.SaveProviderApiKeyAsync(
-                SelectedModelProviderOption.Slug,
+                savedSlug,
                 SelectedModelProviderOption.EnvVarName,
                 key,
                 SelectedProfile?.Name);
             SoulProviderApiKeyInput = "";
-            SoulProviderApiKeyFeedback = AppLocalization.T("Saved to server, refreshing models...", "已保存到服务端，正在刷新模型列表...");
+            _providersWithSavedKey.Add(savedSlug);
+            // Reset so the refreshed list picks this provider's own first model (never a leftover one).
+            SoulEditorProviderInput = savedSlug;
+            SoulEditorModelInput = "";
+            RaiseBotModelVisibilityChanged();
             await LoadBotModelProvidersAsync(refresh: true);
+            SoulProviderApiKeyFeedback = "";
         }
         catch (Exception ex)
         {
@@ -1690,22 +1741,19 @@ public sealed partial class MainViewModel
     [RelayCommand]
     private void SelectDefaultFirstBotModelMode()
     {
+        SoulManualProviderInput = false;
         SoulUseCustomProviderModel = false;
         SoulEditorProviderInput = _firstBotProvider;
         SoulEditorModelInput = _firstBotModel;
-        SyncProviderSelectionFromStrings(_firstBotProvider, _firstBotModel);
+        RaiseBotModelVisibilityChanged();
     }
 
     [RelayCommand]
     private void SelectCustomBotModelMode()
     {
         SoulUseCustomProviderModel = true;
-        if (string.IsNullOrWhiteSpace(SoulEditorModelInput) && !string.IsNullOrWhiteSpace(_firstBotModel))
-        {
-            SoulEditorProviderInput = _firstBotProvider;
-            SoulEditorModelInput = _firstBotModel;
-        }
         SyncProviderSelectionFromStrings(SoulEditorProviderInput, SoulEditorModelInput);
+        RaiseBotModelVisibilityChanged();
     }
 
     [RelayCommand]
@@ -1743,16 +1791,18 @@ public sealed partial class MainViewModel
         if (string.IsNullOrWhiteSpace(source) || source == "(Fresh profile)")
         {
             InheritedFunctionalApisSummary = AppLocalization.T(
-                "Fresh profile selected — functional APIs (Tavily, etc.) will not be cloned unless a source bot is chosen.",
-                "当前为全新空白模板；若需默认继承 Tavily 等功能性 API，请选择首个智能体作为模板。");
+                "Fresh template — tool keys won't be cloned",
+                "空白模板 · 不继承既有工具密钥");
             return;
         }
 
+        var fallbackSummary = AppLocalization.T(
+            "Automatically inheriting tools & skills from existing workspace",
+            "已自动继承现有工具集与技能配置");
+
         if (_restClient is null)
         {
-            InheritedFunctionalApisSummary = AppLocalization.T(
-                $"Functional APIs (e.g. Tavily), tools & skills inherit from @{source}.",
-                $"将默认从首个智能体 @{source} 继承 Tavily 等所有功能性 API、工具与技能配置。");
+            InheritedFunctionalApisSummary = fallbackSummary;
             return;
         }
 
@@ -1773,31 +1823,19 @@ public sealed partial class MainViewModel
                     {
                         _suppressCloneFromTrack = false;
                     }
-                    source = "default";
                     sourceKeys = defaultKeys;
                 }
             }
 
-            if (sourceKeys.Count > 0)
-            {
-                var preview = string.Join(", ", sourceKeys.Take(4).Select(k => k.Key));
-                var suffix = sourceKeys.Count > 4 ? $" (+{sourceKeys.Count - 4})" : "";
-                InheritedFunctionalApisSummary = AppLocalization.T(
-                    $"Inherits functional APIs from @{source}: {preview}{suffix}",
-                    $"默认从 @{source} 继承功能性 API（{preview}{suffix}）及工具/技能配置");
-            }
-            else
-            {
-                InheritedFunctionalApisSummary = AppLocalization.T(
-                    $"Inherits functional APIs (e.g. Tavily), tools & skills from @{source}.",
-                    $"默认从 @{source} 继承所有功能性 API（如 Tavily）、工具集与技能配置。");
-            }
+            InheritedFunctionalApisSummary = sourceKeys.Count > 0
+                ? AppLocalization.T(
+                    $"Automatically inheriting tools, skills & {sourceKeys.Count} functional API key(s)",
+                    $"已自动继承工具、技能与 {sourceKeys.Count} 项功能性密钥")
+                : fallbackSummary;
         }
         catch
         {
-            InheritedFunctionalApisSummary = AppLocalization.T(
-                $"Inherits functional APIs (e.g. Tavily), tools & skills from @{source}.",
-                $"默认从 @{source} 继承所有功能性 API（如 Tavily）、工具集与技能配置。");
+            InheritedFunctionalApisSummary = fallbackSummary;
         }
     }
 
@@ -1877,18 +1915,20 @@ public sealed partial class MainViewModel
 
     private void UpdateFirstBotPresetSummary(string? sourceName)
     {
-        var prefix = string.IsNullOrWhiteSpace(sourceName) ? "" : $"{sourceName} · ";
+        SoulFirstBotPresetModelLabel = !string.IsNullOrWhiteSpace(_firstBotModel)
+            ? _firstBotModel
+            : AppLocalization.T("Server default model", "服务端默认模型");
+        SoulFirstBotPresetProviderBadge = !string.IsNullOrWhiteSpace(_firstBotProvider)
+            ? _firstBotProvider
+            : "default";
+
         if (!string.IsNullOrWhiteSpace(_firstBotProvider) && !string.IsNullOrWhiteSpace(_firstBotModel))
         {
-            SoulFirstBotPresetSummary = $"{prefix}{_firstBotProvider} / {_firstBotModel}";
-        }
-        else if (!string.IsNullOrWhiteSpace(_firstBotModel))
-        {
-            SoulFirstBotPresetSummary = $"{prefix}{_firstBotModel}";
+            SoulFirstBotPresetSummary = $"{_firstBotModel} ({_firstBotProvider})";
         }
         else
         {
-            SoulFirstBotPresetSummary = AppLocalization.T("Gateway default provider & model", "服务端默认提供商与模型");
+            SoulFirstBotPresetSummary = SoulFirstBotPresetModelLabel;
         }
     }
 
@@ -1905,7 +1945,6 @@ public sealed partial class MainViewModel
             {
                 SoulEditorProviderInput = _firstBotProvider;
                 SoulEditorModelInput = _firstBotModel;
-                SyncProviderSelectionFromStrings(_firstBotProvider, _firstBotModel);
             }
         }
         catch
@@ -1964,17 +2003,15 @@ public sealed partial class MainViewModel
                 AvailableModelProviders.Add(p);
             }
 
-            BotProvidersStatusSummary = AvailableModelProviders.Count > 0
-                ? AppLocalization.T($"Synced {AvailableModelProviders.Count} server providers", $"已同步服务端 {AvailableModelProviders.Count} 个 API 提供商")
-                : AppLocalization.T("No server providers returned (manual entry enabled)", "服务端未返回提供商列表，可手动填写");
+            BotProvidersStatusSummary = merged.Count > 0
+                ? AppLocalization.T($"{merged.Count} server providers", $"{merged.Count} 个服务端服务商")
+                : AppLocalization.T("Manual entry enabled", "可手动填写服务商");
 
-            OnPropertyChanged(nameof(HasAnyAvailableModelProviders));
-            OnPropertyChanged(nameof(ShowBotDropdownModelPickers));
-            OnPropertyChanged(nameof(ShowBotDropdownModelBox));
-            OnPropertyChanged(nameof(ShowBotCustomModelFallbackBox));
-            OnPropertyChanged(nameof(ShowBotManualModelInputs));
-
-            SyncProviderSelectionFromStrings(SoulEditorProviderInput, SoulEditorModelInput);
+            if (ShowCustomModelConfigPanel)
+            {
+                SyncProviderSelectionFromStrings(SoulEditorProviderInput, SoulEditorModelInput);
+            }
+            RaiseBotModelVisibilityChanged();
         }
         catch (Exception ex)
         {
@@ -1989,12 +2026,11 @@ public sealed partial class MainViewModel
 
     private void SyncProviderSelectionFromStrings(string provider, string model)
     {
-        if (AvailableModelProviders.Count == 0)
+        var realProviders = AvailableModelProviders.ToList();
+        if (realProviders.Count == 0)
         {
             AvailableModelsForSelectedProvider.Clear();
-            OnPropertyChanged(nameof(HasModelsForSelectedProvider));
-            OnPropertyChanged(nameof(ShowBotDropdownModelBox));
-            OnPropertyChanged(nameof(ShowBotCustomModelFallbackBox));
+            RaiseBotModelVisibilityChanged();
             return;
         }
 
@@ -2003,22 +2039,21 @@ public sealed partial class MainViewModel
         {
             var norm = provider.Trim();
             var customNorm = norm.StartsWith("custom:", StringComparison.OrdinalIgnoreCase) ? norm : $"custom:{norm}";
-            match = AvailableModelProviders.FirstOrDefault(p =>
+            match = realProviders.FirstOrDefault(p =>
                 string.Equals(p.Slug, norm, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(p.Slug, customNorm, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(p.DisplayName, norm, StringComparison.OrdinalIgnoreCase)
                 || p.Aliases.Any(a => string.Equals(a, norm, StringComparison.OrdinalIgnoreCase)));
         }
-        match ??= AvailableModelProviders.FirstOrDefault(p => p.IsCurrent) ?? AvailableModelProviders[0];
+        // A model only belongs to the provider it was saved with; on a fallback pick, drop it.
+        var explicitMatch = match is not null;
+        match ??= realProviders.FirstOrDefault(p => p.IsCurrent) ?? realProviders[0];
 
         _syncingProviderSelection = true;
         try
         {
-            var preservedModel = !string.IsNullOrWhiteSpace(model) ? model.Trim() : SoulEditorModelInput;
-            if (!string.IsNullOrWhiteSpace(preservedModel))
-            {
-                SoulEditorModelInput = preservedModel;
-            }
+            var preservedModel = explicitMatch && !string.IsNullOrWhiteSpace(model) ? model.Trim() : "";
+            SoulEditorModelInput = preservedModel;
 
             SelectedModelProviderOption = match;
             if (!string.IsNullOrWhiteSpace(preservedModel))
@@ -2031,11 +2066,9 @@ public sealed partial class MainViewModel
                     exact = preservedModel;
                 }
                 SoulEditorModelInput = exact ?? preservedModel;
-                OnPropertyChanged(nameof(HasModelsForSelectedProvider));
-                OnPropertyChanged(nameof(ShowBotDropdownModelBox));
-                OnPropertyChanged(nameof(ShowBotCustomModelFallbackBox));
                 OnPropertyChanged(nameof(SoulEditorModelInput));
             }
+            RaiseBotModelVisibilityChanged();
         }
         finally
         {

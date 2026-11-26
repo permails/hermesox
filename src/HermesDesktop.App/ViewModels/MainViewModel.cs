@@ -367,11 +367,11 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         ? AppLocalization.T("Create Job", "创建任务")
         : AppLocalization.T("Save Changes", "保存修改");
     public string SoulEditorHeaderTitle => IsCreatingSoul
-        ? AppLocalization.T("New Bot / Multi-Soul", "新建智能体 / 多 Soul")
-        : AppLocalization.T($"Edit SOUL.md · @{SoulEditorSlugInput}", $"编辑 SOUL.md · @{SoulEditorSlugInput}");
+        ? AppLocalization.T("New Agent", "新建智能体")
+        : AppLocalization.T($"Agent Settings · @{SoulEditorSlugInput}", $"智能体设置 · @{SoulEditorSlugInput}");
     public string SoulEditorPrimaryActionLabel => IsCreatingSoul
-        ? AppLocalization.T("Create Soul & Profile", "创建 Soul 与配置")
-        : AppLocalization.T("Save SOUL.md", "保存 SOUL.md");
+        ? AppLocalization.T("Create Agent", "创建智能体")
+        : AppLocalization.T("Save Changes", "保存修改");
     public bool CanDeleteEditingProfile => !IsCreatingSoul && !string.Equals(SoulEditorSlugInput, "default", StringComparison.OrdinalIgnoreCase);
     public string SoulCharCountLabel => AppLocalization.T(
         $"{SoulEditorText.Length} chars · {(string.IsNullOrEmpty(SoulEditorText) ? 0 : SoulEditorText.Split('\n').Length)} lines",
@@ -554,6 +554,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     {
         OnPropertyChanged(nameof(IsSoulPersonalitySubTab));
         OnPropertyChanged(nameof(IsSoulCapabilitiesSubTab));
+        RaiseBotModelVisibilityChanged();
     }
     partial void OnIsCreatingSoulChanged(bool value)
     {
@@ -562,6 +563,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(CanDeleteEditingProfile));
         OnPropertyChanged(nameof(IsSoulPersonalitySubTab));
         OnPropertyChanged(nameof(IsSoulCapabilitiesSubTab));
+        RaiseBotModelVisibilityChanged();
     }
     partial void OnSoulEditorSlugInputChanged(string value)
     {
@@ -2669,8 +2671,11 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         SoulEditorProviderInput = _soulOriginalProvider;
         SoulEditorModelInput = _soulOriginalModel;
         SoulManualProviderInput = false;
-        InitializeFirstBotProviderPreset();
+        SelectedModelProviderOption = null;
         SoulUseCustomProviderModel = true;
+        InitializeFirstBotProviderPreset();
+        SoulEditorProviderInput = _soulOriginalProvider;
+        SoulEditorModelInput = _soulOriginalModel;
         IsSoulEditorOpen = true;
 
         if (_wsClient is not { IsConnected: true })
@@ -2715,6 +2720,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         _ = LoadInheritedFunctionalApisAsync();
         SoulUseCustomProviderModel = false;
         SoulManualProviderInput = false;
+        _providersWithSavedKey.Clear();
+        SelectedModelProviderOption = null;
         SoulEditorProviderInput = _firstBotProvider;
         SoulEditorModelInput = _firstBotModel;
         IsSoulEditorOpen = true;

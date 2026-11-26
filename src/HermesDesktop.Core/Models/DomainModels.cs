@@ -655,13 +655,15 @@ public sealed record ModelProviderOption(
     string? EnvVarName = null,
     string? SourceTag = null)
 {
+    public bool IsReady => IsCurrent || IsConfigured;
+
     public string StatusBadge => IsCurrent
         ? Localization.AppLocalization.T("Active", "当前")
         : IsConfigured
             ? (string.Equals(SourceTag, "custom", StringComparison.OrdinalIgnoreCase)
                 ? Localization.AppLocalization.T("Custom", "自定义")
-                : Localization.AppLocalization.T("Ready", "已配置"))
-            : Localization.AppLocalization.T("Public · Add Key", "公共 · 未配Key");
+                : Localization.AppLocalization.T("Ready", "已就绪"))
+            : Localization.AppLocalization.T("Needs Key", "需配密钥");
 }
 
 public sealed record FunctionalApiKeyInfo(

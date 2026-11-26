@@ -176,34 +176,37 @@ public sealed class LocStrings : INotifyPropertyChanged
 
     // SOUL.md Editor / Creator Modal
     public string SoulModalSubtitle => L(
-        "Each profile keeps its own SOUL.md personality, memory, skills, and conversation history.",
-        "每个 Profile 拥有独立的 SOUL.md 人格、记忆、技能配置与会话历史。");
+        "Configure identity, model, and persona. Search & tool capabilities are inherited automatically.",
+        "设定名称、对话模型与角色指令，联网检索与工具能力将自动就绪。");
     public string Reload => L("Reload", "重新加载");
-    public string DisplayNameTitleLabel => L("Display Name / Title", "显示名称 / 标题");
-    public string DisplayNameTitleWatermark => L("e.g. Math Tutor / Atlas", "例如：数学辅导 / Atlas");
-    public string ProfileSlugLabel => L("Bot ID / @handle * (Required)", "智能体 ID / @用户名 *（必填）");
-    public string ProfileSlugWatermark => L("e.g. pm-expert (lowercase, digits, _ or -)", "例如：pm-expert（英文、数字、_ 或 -）");
+    public string DisplayNameTitleLabel => L("Name", "智能体名称");
+    public string DisplayNameTitleWatermark => L("e.g. Product Expert / Atlas", "例如：产品专家 / Atlas");
+    public string ProfileSlugLabel => L("Handle (@ID)", "唯一标识 (@ID)");
+    public string ProfileSlugWatermark => L("e.g. pm-expert", "例如：pm-expert");
     public string ProfileSlugHint => L(
-        "Required. Used as this bot's unique folder ID and @mention handle across bots & CLI (no auto-generation).",
-        "必填项：用于多智能体之间 @点名协作与后端配置标识（不会再根据中文自动生成乱码）。");
-    public string DisplayTitleLabel => L("Display Title", "显示名称");
+        "Used for @mentions in group collaboration (lowercase letters, digits, _ or -).",
+        "用于多智能体 @点名协作，仅限小写字母、数字、_ 或 -");
+    public string DisplayTitleLabel => L("Name", "智能体名称");
     public string DisplayTitleWatermark => L("Profile display name", "Profile 显示名称");
     public string DuplicateAsNewSoul => L("Duplicate as New Soul", "复制为新 Soul");
-    public string MissionDescriptionLabel => L("Mission / Description", "职责 / 简介");
+    public string MissionDescriptionLabel => L("Summary", "职责简介");
     public string MissionDescriptionWatermark => L(
-        "Short role summary shown on bot cards and teammate rosters",
-        "用于智能体卡片与协作列表的简短职责描述");
-    public string StartFromLabel => L("Start From (Clone Config)", "基于配置模板创建");
-    public string ShareAuth => L("Share Auth", "共享鉴权凭据");
-    public string NoSkills => L("No Skills", "不继承技能");
+        "One-line role summary (optional)",
+        "一句话描述它擅长的领域（选填）");
+    public string StartFromLabel => L("Clone Capabilities From", "能力继承源");
+    public string ShareAuth => L("Share Credentials", "共享凭据");
+    public string NoSkills => L("Skip Bundled Skills", "不加载预设技能");
+    public string PersonaSectionHeader => L("Persona Instructions", "角色设定与指令");
+    public string PersonaAutoHint => L("Auto-generated if left blank", "留空自动生成");
+    public string AdvancedInheritHeader => L("Advanced Inheritance Options", "高级继承选项");
     public string SoulContentWatermark => L(
-        "Leave blank when creating to auto-generate an identity SOUL.md from Title + Mission, or write custom SOUL.md instructions here...",
-        "新建时留空将自动根据名称与职责生成 SOUL.md，也可直接在此编写自定义人格提示词...");
+        "Leave blank to auto-generate persona from Name & Summary, or write custom instructions…",
+        "留空将根据名称与简介自动生成角色设定，也可在此编写专属指令…");
     public string DeleteProfile => L("Delete Profile", "删除配置文件");
     public string ConfirmDeleteQuestion => L("Confirm delete?", "确认删除？");
     public string YesDelete => L("Yes, Delete", "确认删除");
     public string Keep => L("Keep", "保留");
-    public string SoulTabPersonality => L("SOUL.md Personality", "SOUL.md 人格设定");
+    public string SoulTabPersonality => L("Overview & Persona", "基础与角色");
     public string SoulTabCapabilities => L("Skills · Tools · MCP", "技能 · 工具 · MCP");
     public string SkillsSectionHeader => L("SKILLS", "技能列表 (Skills)");
     public string ToolsetsSectionHeader => L("TOOLSETS (at least 1 must stay enabled)", "工具集 (Toolsets，至少保留 1 项开启)");
@@ -322,13 +325,13 @@ public sealed class LocStrings : INotifyPropertyChanged
     public string StartupSwitchServerBtn => L("Manage Servers", "管理服务器");
 
     // Per-Bot Provider & Model Selection
-    public string BotModelSectionHeader => L("API Provider & Model", "API 提供商与模型配置");
-    public string BotUseFirstPresetBtn => L("Use First Bot Default", "默认沿用首个智能体配置");
-    public string BotCustomModelBtn => L("New / Custom Config", "自定义 / 新建配置");
-    public string BotProviderLabel => L("Provider", "API 提供商 (Provider)");
-    public string BotModelLabel => L("Model", "模型名称 (Model)");
+    public string BotModelSectionHeader => L("Model", "对话模型");
+    public string BotUseFirstPresetBtn => L("Default Model", "沿用默认模型");
+    public string BotCustomModelBtn => L("Custom Model", "指定服务商与模型");
+    public string BotProviderLabel => L("Provider", "服务商");
+    public string BotModelLabel => L("Model", "模型");
     public string BotManualInputToggle => L("Manual input (custom provider / model)", "手动输入自定义 Provider / Model");
-    public string BotRefreshModelsBtn => L("Refresh Models", "刷新模型列表");
+    public string BotRefreshModelsBtn => L("↻ Refresh", "↻ 刷新");
     public string SelectTextBtn => L("Select", "框选");
     public string SelectAllBtn => L("Select All", "全选");
     public string BackToChatViewBtn => L("Back to Chat View", "返回排版视图");

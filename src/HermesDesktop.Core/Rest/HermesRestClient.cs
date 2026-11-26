@@ -445,20 +445,13 @@ public sealed class HermesRestClient : IDisposable
 
             var isPassword = GetBool(row, "is_password") == true;
             var keyUpper = prop.Name.ToUpperInvariant();
-            var looksFunctionalKey = isPassword
+            var looksSecretKey = isPassword
                 || keyUpper.EndsWith("_API_KEY", StringComparison.Ordinal)
                 || keyUpper.EndsWith("_KEY", StringComparison.Ordinal)
                 || keyUpper.EndsWith("_TOKEN", StringComparison.Ordinal)
-                || keyUpper.EndsWith("_SECRET", StringComparison.Ordinal)
-                || category.Equals("tools", StringComparison.OrdinalIgnoreCase)
-                || category.Equals("web", StringComparison.OrdinalIgnoreCase)
-                || category.Equals("search", StringComparison.OrdinalIgnoreCase)
-                || category.Equals("voice", StringComparison.OrdinalIgnoreCase)
-                || category.Equals("tts", StringComparison.OrdinalIgnoreCase)
-                || category.Equals("image_gen", StringComparison.OrdinalIgnoreCase)
-                || category.Equals("mcp", StringComparison.OrdinalIgnoreCase);
+                || keyUpper.EndsWith("_SECRET", StringComparison.Ordinal);
 
-            if (!looksFunctionalKey) continue;
+            if (!looksSecretKey) continue;
 
             var label = FirstNonEmpty(GetString(row, "label"), GetString(row, "description"), prop.Name) ?? prop.Name;
             list.Add(new FunctionalApiKeyInfo(prop.Name, string.IsNullOrEmpty(category) ? "tools" : category, label, true));

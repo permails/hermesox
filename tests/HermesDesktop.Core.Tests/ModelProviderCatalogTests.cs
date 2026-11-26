@@ -264,6 +264,11 @@ public class ModelProviderCatalogTests
             "is_set": false,
             "is_password": true
           },
+          "BROWSER_INACTIVITY_TIMEOUT": {
+            "category": "tools",
+            "is_set": true,
+            "is_password": false
+          },
           "OPENROUTER_API_KEY": {
             "category": "provider",
             "is_set": true,
@@ -279,6 +284,7 @@ public class ModelProviderCatalogTests
         Assert.Contains(keys, k => k.Key == "FIRECRAWL_API_KEY" && k.IsSet);
         Assert.DoesNotContain(keys, k => k.Key == "OPENROUTER_API_KEY");
         Assert.DoesNotContain(keys, k => k.Key == "EXA_API_KEY");
+        Assert.DoesNotContain(keys, k => k.Key == "BROWSER_INACTIVITY_TIMEOUT");
     }
 
     [Fact]
