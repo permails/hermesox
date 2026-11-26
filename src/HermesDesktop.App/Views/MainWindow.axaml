@@ -227,8 +227,11 @@
                             CommandParameter="{Binding ActiveSession}"/>
                   </StackPanel>
                   <StackPanel Orientation="Horizontal" Spacing="10">
-                    <TextBlock Text="{Binding CurrentModelLabel}" FontSize="11.5" Foreground="{DynamicResource WinAccentTextBrush}" FontWeight="Medium"/>
-                    <TextBlock Text="{Binding CurrentCwd}" FontSize="11.5" Foreground="{DynamicResource WinTextTertiaryBrush}" TextTrimming="CharacterEllipsis"/>
+                    <Button Classes="ghost" Padding="4,1" Command="{Binding OpenActiveProfileSoulEditorCommand}"
+                            ToolTip.Tip="{Binding Loc.BotModelSectionHeader}" VerticalAlignment="Center">
+                      <TextBlock Text="{Binding CurrentModelLabel}" FontSize="11.5" Foreground="{DynamicResource WinAccentTextBrush}" FontWeight="Medium"/>
+                    </Button>
+                    <TextBlock Text="{Binding CurrentCwd}" FontSize="11.5" Foreground="{DynamicResource WinTextTertiaryBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
                   </StackPanel>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
@@ -1716,6 +1719,7 @@
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                   <TextBlock Text="{Binding DisplayName}"/>
                                   <TextBlock Text="{Binding Slug}" FontSize="11" Foreground="{DynamicResource WinTextTertiaryBrush}" VerticalAlignment="Center"/>
+                                  <TextBlock Text="{Binding StatusBadge}" FontSize="10.5" Foreground="{DynamicResource WinAccentTextBrush}" VerticalAlignment="Center"/>
                                 </StackPanel>
                               </DataTemplate>
                             </ComboBox.ItemTemplate>
@@ -1724,9 +1728,26 @@
                         <StackPanel Grid.Column="1" Spacing="4" Margin="8,0,0,0">
                           <TextBlock Text="{Binding Loc.BotModelLabel}" FontSize="11.5" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
                           <ComboBox IsVisible="{Binding ShowBotDropdownModelBox}" ItemsSource="{Binding AvailableModelsForSelectedProvider}" SelectedItem="{Binding SoulEditorModelInput}" HorizontalAlignment="Stretch"/>
-                          <TextBox IsVisible="{Binding ShowBotCustomModelFallbackBox}" Text="{Binding SoulEditorModelInput}" Watermark="e.g. deepseek-chat / gpt-4o"/>
+                          <TextBox IsVisible="{Binding ShowBotCustomModelFallbackBox}" Text="{Binding SoulEditorModelInput}" Watermark="e.g. google/gemini-2.5-pro / deepseek-chat"/>
                         </StackPanel>
                       </Grid>
+
+                      <!-- Inline API Key setup when picking an unconfigured server public provider (e.g. OpenRouter / Gemini) -->
+                      <Border IsVisible="{Binding ShowInlineProviderApiKeySetup}" Padding="10,8" CornerRadius="4"
+                              Background="{DynamicResource WinCardFillBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="1">
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="{Binding SelectedProviderApiKeyPrompt}" FontSize="11.5" Foreground="{DynamicResource WinTextSecondaryBrush}" TextWrapping="Wrap"/>
+                          <Grid ColumnDefinitions="*,Auto">
+                            <TextBox Grid.Column="0" Text="{Binding SoulProviderApiKeyInput}" PasswordChar="•" Watermark="sk-... / AIza..." Margin="0,0,8,0"/>
+                            <Button Grid.Column="1" Classes="accent" Content="{Binding SaveProviderKeyBtnLabel}" Padding="12,5" FontSize="11.5"
+                                    IsEnabled="{Binding !IsSavingProviderApiKey}"
+                                    Command="{Binding SaveInlineProviderApiKeyCommand}"/>
+                          </Grid>
+                          <TextBlock Text="{Binding SoulProviderApiKeyFeedback}"
+                                     IsVisible="{Binding SoulProviderApiKeyFeedback, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                     FontSize="11" Foreground="{DynamicResource WinAccentTextBrush}" TextWrapping="Wrap"/>
+                        </StackPanel>
+                      </Border>
 
                       <Grid IsVisible="{Binding ShowBotManualModelInputs}" ColumnDefinitions="*,*">
                         <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,8,0">

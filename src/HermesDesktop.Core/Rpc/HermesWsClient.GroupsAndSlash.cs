@@ -38,40 +38,57 @@ public sealed partial class HermesWsClient
         bool refresh = false,
         CancellationToken ct = default)
     {
-        var p = new Dictionary<string, object?> { ["explicit_only"] = true };
-        if (!string.IsNullOrWhiteSpace(sessionId)) p["session_id"] = sessionId;
-        if (refresh) p["refresh"] = true;
+        async Task<IReadOnlyList<ModelProviderOption>> QueryAsync(bool? explicitOnly)
+        {
+            var p = new Dictionary<string, object?>();
+            if (explicitOnly.HasValue) p["explicit_only"] = explicitOnly.Value;
+            if (!string.IsNullOrWhiteSpace(sessionId)) p["session_id"] = sessionId;
+            if (refresh) p["refresh"] = true;
 
-        JsonElement res;
-        try
-        {
-            res = await RpcAsync("model.options", p, timeout: TimeSpan.FromSeconds(refresh ? 30 : 12), ct: ct);
-        }
-        catch (RpcException) when (refresh)
-        {
-            p.Remove("refresh");
-            res = await RpcAsync("model.options", p, timeout: TimeSpan.FromSeconds(12), ct: ct);
-        }
-
-        var providers = DecodeModelProviders(res);
-        if (providers.Count == 0)
-        {
-            var fallbackParams = new Dictionary<string, object?>();
-            if (!string.IsNullOrWhiteSpace(sessionId)) fallbackParams["session_id"] = sessionId;
+            JsonElement res;
             try
             {
-                var fallbackRes = await RpcAsync("model.options", fallbackParams, timeout: TimeSpan.FromSeconds(12), ct: ct);
-                providers = DecodeModelProviders(fallbackRes);
+                res = await RpcAsync("model.options", p, timeout: TimeSpan.FromSeconds(refresh ? 30 : 12), ct: ct);
+            }
+            catch (RpcException) when (refresh)
+            {
+                p.Remove("refresh");
+                res = await RpcAsync("model.options", p, timeout: TimeSpan.FromSeconds(12), ct: ct);
+            }
+            return DecodeModelProviders(res, defaultIsConfigured: explicitOnly == true);
+        }
+
+        IReadOnlyList<ModelProviderOption> explicitList = [];
+        try
+        {
+            explicitList = await QueryAsync(true);
+        }
+        catch
+        {
+            // Ignore explicit query failure and try full catalog below
+        }
+
+        IReadOnlyList<ModelProviderOption> fullList = [];
+        try
+        {
+            fullList = await QueryAsync(false);
+        }
+        catch
+        {
+            try
+            {
+                fullList = await QueryAsync(null);
             }
             catch
             {
-                // Older gateways or empty explicit catalog fall back to REST provider catalog
+                // Older gateway or unsupported param
             }
         }
-        return providers;
+
+        return MergeModelProviders(explicitList, fullList);
     }
 
-    public static IReadOnlyList<ModelProviderOption> DecodeModelProviders(JsonElement root)
+    public static IReadOnlyList<ModelProviderOption> DecodeModelProviders(JsonElement root, bool defaultIsConfigured = true)
     {
         var providers = new List<ModelProviderOption>();
         JsonElement arr = default;
@@ -108,6 +125,13 @@ public sealed partial class HermesWsClient
             var isCurrent = GetBool(item, "is_current") == true
                 || GetBool(item, "current") == true
                 || GetBool(item, "active") == true;
+            var isConfigured = isCurrent
+                || (GetBool(item, "configured")
+                    ?? GetBool(item, "is_configured")
+                    ?? GetBool(item, "has_api_key")
+                    ?? GetBool(item, "logged_in")
+                    ?? GetBool(item, "available")
+                    ?? defaultIsConfigured);
 
             var aliases = new List<string>();
             var aliasSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -164,7 +188,19 @@ public sealed partial class HermesWsClient
                 }
             }
 
-            providers.Add(new ModelProviderOption(slug, displayName, aliases, isCurrent, models));
+            var isCustom = string.Equals(slug, "custom", StringComparison.OrdinalIgnoreCase)
+                || slug.StartsWith("custom:", StringComparison.OrdinalIgnoreCase)
+                || GetBool(item, "is_custom") == true;
+
+            providers.Add(new ModelProviderOption(
+                slug,
+                displayName,
+                aliases,
+                isCurrent,
+                models,
+                IsConfigured: isConfigured,
+                EnvVarName: TrimNonEmpty(GetString(item, "env_var")),
+                SourceTag: isCustom ? "custom" : null));
         }
 
         return providers;
@@ -175,7 +211,9 @@ public sealed partial class HermesWsClient
     {
         var merged = new List<ModelProviderOption>();
 
-        static bool IsCustomSlug(string s) => s.StartsWith("custom:", StringComparison.OrdinalIgnoreCase);
+        static bool IsCustomSlug(string s) =>
+            string.Equals(s, "custom", StringComparison.OrdinalIgnoreCase)
+            || s.StartsWith("custom:", StringComparison.OrdinalIgnoreCase);
 
         static int FindMatchIndex(List<ModelProviderOption> list, ModelProviderOption candidate)
         {
@@ -191,7 +229,7 @@ public sealed partial class HermesWsClient
             for (var i = 0; i < list.Count; i++)
             {
                 var existing = list[i];
-                // Never collapse custom:<id> endpoints into identically named built-in providers
+                // Never collapse custom/custom:<id> endpoints into identically named built-in providers
                 if (IsCustomSlug(existing.Slug) != candCustom)
                 {
                     continue;
@@ -231,12 +269,17 @@ public sealed partial class HermesWsClient
                         string.IsNullOrWhiteSpace(item.DisplayName) ? item.Slug.Trim() : item.DisplayName.Trim(),
                         normAliases,
                         item.IsCurrent,
-                        normModels));
+                        normModels,
+                        item.IsConfigured || item.IsCurrent,
+                        TrimNonEmpty(item.EnvVarName),
+                        TrimNonEmpty(item.SourceTag)));
                     continue;
                 }
 
                 var current = merged[idx];
-                var preferIncomingSlug = IsCustomSlug(item.Slug) && !IsCustomSlug(current.Slug);
+                var preferIncomingSlug = item.Slug.StartsWith("custom:", StringComparison.OrdinalIgnoreCase)
+                    && !current.Slug.StartsWith("custom:", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(current.Slug, "custom", StringComparison.OrdinalIgnoreCase);
                 var nextSlug = preferIncomingSlug ? item.Slug.Trim() : current.Slug;
                 var nextDisplay = string.Equals(current.DisplayName, current.Slug, StringComparison.OrdinalIgnoreCase)
                     && !string.IsNullOrWhiteSpace(item.DisplayName)
@@ -265,11 +308,22 @@ public sealed partial class HermesWsClient
                     nextDisplay,
                     aliasList,
                     current.IsCurrent || item.IsCurrent,
-                    modelList);
+                    modelList,
+                    current.IsConfigured || item.IsConfigured || current.IsCurrent || item.IsCurrent,
+                    current.EnvVarName ?? TrimNonEmpty(item.EnvVarName),
+                    current.SourceTag ?? TrimNonEmpty(item.SourceTag));
             }
         }
 
-        return merged;
+        // Put active & configured providers first, then built-in public APIs
+        return merged
+            .Select((item, index) => (item, index))
+            .OrderByDescending(x => x.item.IsCurrent)
+            .ThenByDescending(x => x.item.IsConfigured)
+            .ThenByDescending(x => x.item.Models.Count > 0)
+            .ThenBy(x => x.index)
+            .Select(x => x.item)
+            .ToList();
     }
 
     private static string? TrimNonEmpty(string? value) =>

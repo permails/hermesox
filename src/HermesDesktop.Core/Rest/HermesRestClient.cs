@@ -39,31 +39,21 @@ public sealed class HermesRestClient : IDisposable
             && !string.Equals(profile.Trim(), "default", StringComparison.OrdinalIgnoreCase);
         var profileSuffix = hasCustomProfile ? $"profile={Uri.EscapeDataString(profile!.Trim())}" : "";
 
-        async Task<IReadOnlyList<ModelProviderOption>> TryFetchModelOptionsAsync()
+        async Task<IReadOnlyList<ModelProviderOption>> TryFetchModelOptionsAsync(bool? explicitOnly)
         {
-            var query = new List<string> { "explicit_only=true" };
+            var query = new List<string>();
+            if (explicitOnly.HasValue) query.Add(explicitOnly.Value ? "explicit_only=true" : "explicit_only=false");
             if (hasCustomProfile) query.Add(profileSuffix);
             if (refresh) query.Add("refresh=true");
+            var path = query.Count > 0 ? $"/api/model/options?{string.Join("&", query)}" : "/api/model/options";
             try
             {
-                using var doc = await GetJsonAsync($"/api/model/options?{string.Join("&", query)}", ct);
-                var decoded = Rpc.HermesWsClient.DecodeModelProviders(doc.RootElement);
-                if (decoded.Count > 0) return decoded;
+                using var doc = await GetJsonAsync(path, ct);
+                return Rpc.HermesWsClient.DecodeModelProviders(doc.RootElement, defaultIsConfigured: explicitOnly == true);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                HermesDesktop.Core.Diagnostics.AppDiagnostics.Log("REST_PROVIDERS", $"GET /api/model/options explicit failed: {ex.Message}");
-            }
-
-            try
-            {
-                var path = hasCustomProfile ? $"/api/model/options?{profileSuffix}" : "/api/model/options";
-                using var fallbackDoc = await GetJsonAsync(path, ct);
-                return Rpc.HermesWsClient.DecodeModelProviders(fallbackDoc.RootElement);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                HermesDesktop.Core.Diagnostics.AppDiagnostics.Log("REST_PROVIDERS", $"GET /api/model/options fallback failed: {ex.Message}");
+                HermesDesktop.Core.Diagnostics.AppDiagnostics.Log("REST_PROVIDERS", $"GET {path} failed: {ex.Message}");
                 return [];
             }
         }
@@ -90,7 +80,7 @@ public sealed class HermesRestClient : IDisposable
             try
             {
                 using var doc = await GetJsonAsync("/api/providers/oauth", ct);
-                return DecodeOAuthProviders(doc.RootElement, signedInOnly: true);
+                return DecodeOAuthProviders(doc.RootElement, signedInOnly: false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -107,7 +97,7 @@ public sealed class HermesRestClient : IDisposable
                     ? $"/api/env?profile={Uri.EscapeDataString(targetProfile.Trim())}"
                     : "/api/env";
                 using var doc = await GetJsonAsync(path, ct);
-                return DecodeConfiguredEnvProviders(doc.RootElement);
+                return DecodeEnvProviders(doc.RootElement, includeUnconfigured: true);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -115,22 +105,81 @@ public sealed class HermesRestClient : IDisposable
             }
         }
 
-        var optionsTask = TryFetchModelOptionsAsync();
+        var explicitOptionsTask = TryFetchModelOptionsAsync(true);
+        var fullOptionsTask = TryFetchModelOptionsAsync(false);
+        var defaultOptionsTask = TryFetchModelOptionsAsync(null);
         var profileEndpointsTask = TryFetchCustomEndpointsAsync(profile);
         var defaultEndpointsTask = hasCustomProfile ? TryFetchCustomEndpointsAsync(null) : Task.FromResult<IReadOnlyList<ModelProviderOption>>([]);
         var oauthTask = TryFetchOAuthAsync();
         var profileEnvTask = TryFetchEnvAsync(profile);
         var defaultEnvTask = hasCustomProfile ? TryFetchEnvAsync(null) : Task.FromResult<IReadOnlyList<ModelProviderOption>>([]);
 
-        await Task.WhenAll(optionsTask, profileEndpointsTask, defaultEndpointsTask, oauthTask, profileEnvTask, defaultEnvTask);
+        await Task.WhenAll(
+            explicitOptionsTask,
+            fullOptionsTask,
+            defaultOptionsTask,
+            profileEndpointsTask,
+            defaultEndpointsTask,
+            oauthTask,
+            profileEnvTask,
+            defaultEnvTask);
 
         return Rpc.HermesWsClient.MergeModelProviders(
-            optionsTask.Result,
+            explicitOptionsTask.Result,
+            fullOptionsTask.Result,
+            defaultOptionsTask.Result,
             profileEndpointsTask.Result,
             defaultEndpointsTask.Result,
             oauthTask.Result,
             profileEnvTask.Result,
             defaultEnvTask.Result);
+    }
+
+    public async Task SaveProviderApiKeyAsync(
+        string providerSlug,
+        string? envVarName,
+        string apiKey,
+        string? profile = null,
+        CancellationToken ct = default)
+    {
+        var key = apiKey.Trim();
+        var slug = providerSlug.Trim();
+        if (string.IsNullOrWhiteSpace(key)) throw new ArgumentException("API key cannot be empty.", nameof(apiKey));
+
+        var hasCustomProfile = !string.IsNullOrWhiteSpace(profile)
+            && !string.Equals(profile.Trim(), "default", StringComparison.OrdinalIgnoreCase);
+
+        try
+        {
+            var poolPath = hasCustomProfile
+                ? $"/api/credentials/pool?profile={Uri.EscapeDataString(profile!.Trim())}"
+                : "/api/credentials/pool";
+            await SendJsonAsync(HttpMethod.Post, poolPath, new
+            {
+                provider = slug,
+                api_key = key,
+                label = "HermesDesktop"
+            }, ct);
+            return;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && !string.IsNullOrWhiteSpace(envVarName))
+        {
+            HermesDesktop.Core.Diagnostics.AppDiagnostics.Log("REST_PROVIDERS", $"POST /api/credentials/pool failed ({ex.Message}); trying PUT /api/env");
+        }
+
+        if (!string.IsNullOrWhiteSpace(envVarName))
+        {
+            var envPath = hasCustomProfile
+                ? $"/api/env?profile={Uri.EscapeDataString(profile!.Trim())}"
+                : "/api/env";
+            await SendJsonAsync(HttpMethod.Put, envPath, new
+            {
+                key = envVarName.Trim(),
+                value = key,
+                profile = string.IsNullOrWhiteSpace(profile) ? "default" : profile.Trim(),
+                provider_setup = true
+            }, ct);
+        }
     }
 
     public static IReadOnlyList<ModelProviderOption> DecodeCustomEndpointProviders(JsonElement root)
@@ -164,11 +213,19 @@ public sealed class HermesRestClient : IDisposable
                 : rawId;
             if (string.IsNullOrWhiteSpace(bareId)) continue;
 
-            var slug = $"custom:{bareId}";
+            // Hermes' primary custom endpoint uses bare slug "custom" (not "custom:custom")
+            var slug = string.Equals(bareId, "custom", StringComparison.OrdinalIgnoreCase)
+                ? "custom"
+                : $"custom:{bareId}";
             var displayName = FirstNonEmpty(GetString(row, "name"), GetString(row, "label"), bareId) ?? bareId;
             var isCurrent = GetBool(row, "is_current") == true;
             var aliases = new List<string> { slug };
             if (!aliases.Contains(bareId, StringComparer.OrdinalIgnoreCase)) aliases.Add(bareId);
+            if (string.Equals(bareId, "custom", StringComparison.OrdinalIgnoreCase)
+                && !aliases.Contains("custom:custom", StringComparer.OrdinalIgnoreCase))
+            {
+                aliases.Add("custom:custom");
+            }
 
             var models = new List<string>();
             var modelSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -193,7 +250,7 @@ public sealed class HermesRestClient : IDisposable
                 }
             }
 
-            list.Add(new ModelProviderOption(slug, displayName, aliases, isCurrent, models));
+            list.Add(new ModelProviderOption(slug, displayName, aliases, isCurrent, models, IsConfigured: true, SourceTag: "custom"));
         }
 
         return list;
@@ -233,30 +290,51 @@ public sealed class HermesRestClient : IDisposable
             if (signedInOnly && !signedIn) continue;
 
             var name = FirstNonEmpty(GetString(row, "name"), GetString(row, "label"), id) ?? id;
-            list.Add(new ModelProviderOption(id, name, [id], false, []));
+            list.Add(new ModelProviderOption(id, name, [id], false, [], IsConfigured: signedIn, SourceTag: "oauth"));
         }
 
         return list;
     }
 
-    public static IReadOnlyList<ModelProviderOption> DecodeConfiguredEnvProviders(JsonElement root)
+    public static IReadOnlyList<ModelProviderOption> DecodeConfiguredEnvProviders(JsonElement root) =>
+        DecodeEnvProviders(root, includeUnconfigured: false);
+
+    public static IReadOnlyList<ModelProviderOption> DecodeEnvProviders(JsonElement root, bool includeUnconfigured = true)
     {
         if (root.ValueKind != JsonValueKind.Object) return [];
         var map = root.TryGetProperty("env", out var inner) && inner.ValueKind == JsonValueKind.Object
             ? inner
             : root;
 
-        var list = new List<ModelProviderOption>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var bySlug = new Dictionary<string, (string Label, bool IsSet, string? EnvVar)>(StringComparer.OrdinalIgnoreCase);
+        var order = new List<string>();
+
+        void Upsert(string slug, string label, bool isSet, string? envVar)
+        {
+            if (!bySlug.TryGetValue(slug, out var cur))
+            {
+                order.Add(slug);
+                bySlug[slug] = (label, isSet, envVar);
+                return;
+            }
+
+            var nextLabel = string.Equals(cur.Label, slug, StringComparison.OrdinalIgnoreCase) && !string.Equals(label, slug, StringComparison.OrdinalIgnoreCase)
+                ? label
+                : cur.Label;
+            bySlug[slug] = (nextLabel, cur.IsSet || isSet, cur.EnvVar ?? envVar);
+        }
 
         foreach (var prop in map.EnumerateObject())
         {
             if (prop.Value.ValueKind != JsonValueKind.Object) continue;
             var row = prop.Value;
             if (!string.Equals(GetString(row, "category"), "provider", StringComparison.OrdinalIgnoreCase)) continue;
-            if (GetBool(row, "is_set") != true) continue;
+
+            var isSet = GetBool(row, "is_set") == true;
+            if (!includeUnconfigured && !isSet) continue;
 
             var isPassword = GetBool(row, "is_password") == true;
+            var envVar = isPassword ? prop.Name : null;
             var matchedAnyProfile = false;
 
             if (row.TryGetProperty("provider_profiles", out var profilesEl) && profilesEl.ValueKind == JsonValueKind.Array)
@@ -270,10 +348,9 @@ public sealed class HermesRestClient : IDisposable
                     var slug = FirstNonEmpty(GetString(p, "provider"));
                     if (slug is null) continue;
                     matchedAnyProfile = true;
-                    if (!seen.Add(slug)) continue;
 
                     var label = FirstNonEmpty(GetString(p, "provider_label"), slug) ?? slug;
-                    list.Add(new ModelProviderOption(slug, label, [slug], false, []));
+                    Upsert(slug, label, isSet, envVar);
                 }
             }
 
@@ -282,14 +359,28 @@ public sealed class HermesRestClient : IDisposable
                 var slug = FirstNonEmpty(GetString(row, "provider"));
                 if (slug is null) continue;
                 var primary = isPassword ? (GetBool(row, "provider_primary") ?? true) : true;
-                if (!primary || !seen.Add(slug)) continue;
+                if (!primary) continue;
 
                 var label = FirstNonEmpty(GetString(row, "provider_label"), slug) ?? slug;
-                list.Add(new ModelProviderOption(slug, label, [slug], false, []));
+                Upsert(slug, label, isSet, envVar);
             }
         }
 
-        return list;
+        return order
+            .Select(slug =>
+            {
+                var info = bySlug[slug];
+                return new ModelProviderOption(
+                    slug,
+                    info.Label,
+                    [slug],
+                    false,
+                    [],
+                    IsConfigured: info.IsSet,
+                    EnvVarName: info.EnvVar,
+                    SourceTag: "env");
+            })
+            .ToList();
     }
 
     public async Task<IReadOnlyList<BotProfile>> GetProfilesAsync(CancellationToken ct = default)

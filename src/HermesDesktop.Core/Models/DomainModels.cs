@@ -650,7 +650,19 @@ public sealed record ModelProviderOption(
     string DisplayName,
     IReadOnlyList<string> Aliases,
     bool IsCurrent,
-    IReadOnlyList<string> Models);
+    IReadOnlyList<string> Models,
+    bool IsConfigured = true,
+    string? EnvVarName = null,
+    string? SourceTag = null)
+{
+    public string StatusBadge => IsCurrent
+        ? Localization.AppLocalization.T("Active", "当前")
+        : IsConfigured
+            ? (string.Equals(SourceTag, "custom", StringComparison.OrdinalIgnoreCase)
+                ? Localization.AppLocalization.T("Custom", "自定义")
+                : Localization.AppLocalization.T("Ready", "已配置"))
+            : Localization.AppLocalization.T("Public · Add Key", "公共 · 未配Key");
+}
 
 public sealed record BotRosterSnapshot(
     IReadOnlyList<BotProfile> Profiles,

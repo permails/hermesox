@@ -61,6 +61,12 @@ public class ModelProviderCatalogTests
         {
           "endpoints": [
             {
+              "id": "custom",
+              "name": "Custom",
+              "base_url": "https://api.example.com/v1",
+              "model": "gpt-4o-mini"
+            },
+            {
               "id": "deepseek-proxy",
               "name": "DeepSeek Enterprise",
               "base_url": "https://api.deepseek.internal/v1",
@@ -79,17 +85,70 @@ public class ModelProviderCatalogTests
         """);
 
         var endpoints = HermesRestClient.DecodeCustomEndpointProviders(doc.RootElement);
-        Assert.Equal(2, endpoints.Count);
+        Assert.Equal(3, endpoints.Count);
 
-        Assert.Equal("custom:deepseek-proxy", endpoints[0].Slug);
-        Assert.Equal("DeepSeek Enterprise", endpoints[0].DisplayName);
-        Assert.True(endpoints[0].IsCurrent);
-        Assert.Contains("deepseek-proxy", endpoints[0].Aliases);
-        Assert.Equal(["deepseek-chat", "deepseek-reasoner"], endpoints[0].Models);
+        Assert.Equal("custom", endpoints[0].Slug);
+        Assert.Contains("custom:custom", endpoints[0].Aliases);
+        Assert.Equal(["gpt-4o-mini"], endpoints[0].Models);
 
-        Assert.Equal("custom:local-ollama", endpoints[1].Slug);
-        Assert.Equal("Ollama", endpoints[1].DisplayName);
-        Assert.Equal(["qwen3:32b"], endpoints[1].Models);
+        Assert.Equal("custom:deepseek-proxy", endpoints[1].Slug);
+        Assert.Equal("DeepSeek Enterprise", endpoints[1].DisplayName);
+        Assert.True(endpoints[1].IsCurrent);
+        Assert.Contains("deepseek-proxy", endpoints[1].Aliases);
+        Assert.Equal(["deepseek-chat", "deepseek-reasoner"], endpoints[1].Models);
+
+        Assert.Equal("custom:local-ollama", endpoints[2].Slug);
+        Assert.Equal("Ollama", endpoints[2].DisplayName);
+        Assert.Equal(["qwen3:32b"], endpoints[2].Models);
+    }
+
+    [Fact]
+    public void DecodeEnvProviders_IncludesUnconfiguredPublicProvidersWithEnvKeyNames()
+    {
+        using var envDoc = JsonDocument.Parse("""
+        {
+          "OPENROUTER_API_KEY": {
+            "category": "provider",
+            "is_set": false,
+            "is_password": true,
+            "provider": "openrouter",
+            "provider_label": "OpenRouter"
+          },
+          "GEMINI_API_KEY": {
+            "category": "provider",
+            "is_set": false,
+            "is_password": true,
+            "provider": "gemini",
+            "provider_label": "Google Gemini"
+          }
+        }
+        """);
+
+        var allEnv = HermesRestClient.DecodeEnvProviders(envDoc.RootElement, includeUnconfigured: true);
+        Assert.Equal(2, allEnv.Count);
+        Assert.Contains(allEnv, p => p.Slug == "openrouter" && p.DisplayName == "OpenRouter" && !p.IsConfigured && p.EnvVarName == "OPENROUTER_API_KEY");
+        Assert.Contains(allEnv, p => p.Slug == "gemini" && p.DisplayName == "Google Gemini" && !p.IsConfigured && p.EnvVarName == "GEMINI_API_KEY");
+    }
+
+    [Fact]
+    public void MergeModelProviders_UnifiesBareCustomWithCustomEndpointAndSortsConfiguredFirst()
+    {
+        var modelOptions = new[]
+        {
+            new ModelProviderOption("custom", "Custom endpoint", ["custom"], true, ["custom-model-1"], IsConfigured: true),
+            new ModelProviderOption("openrouter", "OpenRouter", ["openrouter"], false, ["openai/gpt-4o"], IsConfigured: false)
+        };
+        var endpoints = new[]
+        {
+            new ModelProviderOption("custom", "Custom", ["custom", "custom:custom"], true, ["custom-model-1"], IsConfigured: true, SourceTag: "custom")
+        };
+
+        var merged = HermesWsClient.MergeModelProviders(modelOptions, endpoints);
+        Assert.Equal(2, merged.Count);
+        Assert.Equal("custom", merged[0].Slug);
+        Assert.True(merged[0].IsCurrent);
+        Assert.Equal("openrouter", merged[1].Slug);
+        Assert.False(merged[1].IsConfigured);
     }
 
     [Fact]

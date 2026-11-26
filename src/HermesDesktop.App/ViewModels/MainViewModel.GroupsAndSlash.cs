@@ -1532,6 +1532,9 @@ public sealed partial class MainViewModel
     [ObservableProperty] private string _soulFirstBotPresetSummary = "";
     [ObservableProperty] private string _botProvidersStatusSummary = "";
     [ObservableProperty] private bool _isLoadingBotModels;
+    [ObservableProperty] private string _soulProviderApiKeyInput = "";
+    [ObservableProperty] private bool _isSavingProviderApiKey;
+    [ObservableProperty] private string _soulProviderApiKeyFeedback = "";
 
     private string _soulOriginalProvider = "";
     private string _soulOriginalModel = "";
@@ -1545,6 +1548,16 @@ public sealed partial class MainViewModel
     public bool ShowBotDropdownModelBox => ShowBotDropdownModelPickers && HasModelsForSelectedProvider;
     public bool ShowBotCustomModelFallbackBox => ShowBotDropdownModelPickers && !HasModelsForSelectedProvider;
     public bool ShowBotManualModelInputs => SoulUseCustomProviderModel && (SoulManualProviderInput || AvailableModelProviders.Count == 0);
+    public bool ShowInlineProviderApiKeySetup =>
+        SoulUseCustomProviderModel
+        && !SoulManualProviderInput
+        && SelectedModelProviderOption is { IsConfigured: false, EnvVarName: { Length: > 0 } };
+    public string SelectedProviderApiKeyPrompt => SelectedModelProviderOption is { EnvVarName: { Length: > 0 } env }
+        ? AppLocalization.T(
+            $"Server has no saved key for {SelectedModelProviderOption.DisplayName} ({env}). Enter an API key to save to Hermes & load models:",
+            $"服务端尚未配置 {SelectedModelProviderOption.DisplayName}（{env}），粘贴 API Key 保存到服务端后即可拉取并选择模型：")
+        : "";
+    public string SaveProviderKeyBtnLabel => AppLocalization.T("Save Key & Refresh", "保存到服务端并刷新");
 
     partial void OnSoulUseCustomProviderModelChanged(bool value)
     {
@@ -1552,6 +1565,7 @@ public sealed partial class MainViewModel
         OnPropertyChanged(nameof(ShowBotDropdownModelBox));
         OnPropertyChanged(nameof(ShowBotCustomModelFallbackBox));
         OnPropertyChanged(nameof(ShowBotManualModelInputs));
+        OnPropertyChanged(nameof(ShowInlineProviderApiKeySetup));
     }
 
     partial void OnSoulManualProviderInputChanged(bool value)
@@ -1560,15 +1574,23 @@ public sealed partial class MainViewModel
         OnPropertyChanged(nameof(ShowBotDropdownModelBox));
         OnPropertyChanged(nameof(ShowBotCustomModelFallbackBox));
         OnPropertyChanged(nameof(ShowBotManualModelInputs));
+        OnPropertyChanged(nameof(ShowInlineProviderApiKeySetup));
     }
 
     partial void OnSelectedModelProviderOptionChanged(ModelProviderOption? value)
     {
+        SoulProviderApiKeyFeedback = "";
+        OnPropertyChanged(nameof(ShowInlineProviderApiKeySetup));
+        OnPropertyChanged(nameof(SelectedProviderApiKeyPrompt));
+
         if (value is null) return;
         if (!SoulManualProviderInput)
         {
             SoulEditorProviderInput = value.Slug;
         }
+
+        // Preserve target model across Clear() because two-way ComboBox.SelectedItem resets on Clear()
+        var previousModel = SoulEditorModelInput;
 
         AvailableModelsForSelectedProvider.Clear();
         foreach (var m in value.Models)
@@ -1578,13 +1600,18 @@ public sealed partial class MainViewModel
 
         if (_syncingProviderSelection)
         {
-            if (!string.IsNullOrWhiteSpace(SoulEditorModelInput)
-                && !AvailableModelsForSelectedProvider.Contains(SoulEditorModelInput, StringComparer.OrdinalIgnoreCase)
-                && AvailableModelsForSelectedProvider.Count > 0)
+            if (!string.IsNullOrWhiteSpace(previousModel))
             {
-                AvailableModelsForSelectedProvider.Insert(0, SoulEditorModelInput);
+                var matched = AvailableModelsForSelectedProvider.FirstOrDefault(m =>
+                    string.Equals(m, previousModel, StringComparison.OrdinalIgnoreCase));
+                if (matched is null && AvailableModelsForSelectedProvider.Count > 0)
+                {
+                    AvailableModelsForSelectedProvider.Insert(0, previousModel);
+                    matched = previousModel;
+                }
+                SoulEditorModelInput = matched ?? previousModel;
             }
-            if (string.IsNullOrWhiteSpace(SoulEditorModelInput) && AvailableModelsForSelectedProvider.Count > 0)
+            else if (AvailableModelsForSelectedProvider.Count > 0)
             {
                 SoulEditorModelInput = AvailableModelsForSelectedProvider[0];
             }
@@ -1593,11 +1620,11 @@ public sealed partial class MainViewModel
         {
             if (AvailableModelsForSelectedProvider.Count > 0)
             {
-                if (string.IsNullOrWhiteSpace(SoulEditorModelInput)
-                    || !AvailableModelsForSelectedProvider.Contains(SoulEditorModelInput, StringComparer.OrdinalIgnoreCase))
-                {
-                    SoulEditorModelInput = AvailableModelsForSelectedProvider[0];
-                }
+                var matched = !string.IsNullOrWhiteSpace(previousModel)
+                    ? AvailableModelsForSelectedProvider.FirstOrDefault(m =>
+                        string.Equals(m, previousModel, StringComparison.OrdinalIgnoreCase))
+                    : null;
+                SoulEditorModelInput = matched ?? AvailableModelsForSelectedProvider[0];
             }
             else
             {
@@ -1608,6 +1635,41 @@ public sealed partial class MainViewModel
         OnPropertyChanged(nameof(HasModelsForSelectedProvider));
         OnPropertyChanged(nameof(ShowBotDropdownModelBox));
         OnPropertyChanged(nameof(ShowBotCustomModelFallbackBox));
+        OnPropertyChanged(nameof(SoulEditorModelInput));
+    }
+
+    [RelayCommand]
+    private async Task SaveInlineProviderApiKeyAsync()
+    {
+        if (_restClient is null || SelectedModelProviderOption is null || IsSavingProviderApiKey) return;
+        var key = SoulProviderApiKeyInput.Trim();
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            SoulProviderApiKeyFeedback = AppLocalization.T("Please enter an API key first.", "请先输入 API Key。");
+            return;
+        }
+
+        IsSavingProviderApiKey = true;
+        SoulProviderApiKeyFeedback = AppLocalization.T("Saving API key to server...", "正在保存密钥到服务端...");
+        try
+        {
+            await _restClient.SaveProviderApiKeyAsync(
+                SelectedModelProviderOption.Slug,
+                SelectedModelProviderOption.EnvVarName,
+                key,
+                SelectedProfile?.Name);
+            SoulProviderApiKeyInput = "";
+            SoulProviderApiKeyFeedback = AppLocalization.T("Saved to server, refreshing models...", "已保存到服务端，正在刷新模型列表...");
+            await LoadBotModelProvidersAsync(refresh: true);
+        }
+        catch (Exception ex)
+        {
+            SoulProviderApiKeyFeedback = AppLocalization.T($"Save failed: {ex.Message}", $"保存失败：{ex.Message}");
+        }
+        finally
+        {
+            IsSavingProviderApiKey = false;
+        }
     }
 
     [RelayCommand]
@@ -1800,17 +1862,27 @@ public sealed partial class MainViewModel
         _syncingProviderSelection = true;
         try
         {
-            SelectedModelProviderOption = match;
-            if (!string.IsNullOrWhiteSpace(model))
+            var preservedModel = !string.IsNullOrWhiteSpace(model) ? model.Trim() : SoulEditorModelInput;
+            if (!string.IsNullOrWhiteSpace(preservedModel))
             {
-                if (!AvailableModelsForSelectedProvider.Contains(model, StringComparer.OrdinalIgnoreCase))
+                SoulEditorModelInput = preservedModel;
+            }
+
+            SelectedModelProviderOption = match;
+            if (!string.IsNullOrWhiteSpace(preservedModel))
+            {
+                var exact = AvailableModelsForSelectedProvider.FirstOrDefault(m =>
+                    string.Equals(m, preservedModel, StringComparison.OrdinalIgnoreCase));
+                if (exact is null && AvailableModelsForSelectedProvider.Count > 0)
                 {
-                    AvailableModelsForSelectedProvider.Insert(0, model);
-                    OnPropertyChanged(nameof(HasModelsForSelectedProvider));
-                    OnPropertyChanged(nameof(ShowBotDropdownModelBox));
-                    OnPropertyChanged(nameof(ShowBotCustomModelFallbackBox));
+                    AvailableModelsForSelectedProvider.Insert(0, preservedModel);
+                    exact = preservedModel;
                 }
-                SoulEditorModelInput = model;
+                SoulEditorModelInput = exact ?? preservedModel;
+                OnPropertyChanged(nameof(HasModelsForSelectedProvider));
+                OnPropertyChanged(nameof(ShowBotDropdownModelBox));
+                OnPropertyChanged(nameof(ShowBotCustomModelFallbackBox));
+                OnPropertyChanged(nameof(SoulEditorModelInput));
             }
         }
         finally
