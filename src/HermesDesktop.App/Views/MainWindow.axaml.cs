@@ -45,13 +45,20 @@ public partial class MainWindow : Window
                 {
                     PreviewTextBox?.Focus();
                     PreviewTextBox?.SelectAll();
-                });
+                }, DispatcherPriority.Loaded);
+                vm.TranscriptSelectionFocusAndSelectRequested += () => Dispatcher.UIThread.Post(() =>
+                {
+                    TranscriptSelectionBox?.Focus();
+                    TranscriptSelectionBox?.SelectAll();
+                }, DispatcherPriority.Loaded);
                 vm.CopyTextRequested += text => _ = CopyTextSilentlyAsync(text);
                 vm.SaveFileRequested += (fileName, bytes, text) => Dispatcher.UIThread.Post(() =>
                     _ = SaveExportedFileAsync(fileName, bytes, text));
                 vm.GroupTranscriptScrollRequested += () => Dispatcher.UIThread.Post(() => GroupTranscriptScroller?.ScrollToEnd());
             }
         };
+
+        AddHandler(InputElement.KeyDownEvent, OnWindowKeyDown, RoutingStrategies.Tunnel);
 
         if (TranscriptGrid is not null)
         {
@@ -401,16 +408,63 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnWindowKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+
+        if (e.Key == Key.Escape && vm.IsTranscriptSelectionMode && !vm.HasOpenOverlayModal)
+        {
+            e.Handled = true;
+            vm.CloseTranscriptSelectionMode();
+            return;
+        }
+
+        var isSelectAllShortcut = e.Key == Key.A
+            && (e.KeyModifiers == KeyModifiers.Control || e.KeyModifiers == KeyModifiers.Meta);
+        if (!isSelectAllShortcut || vm.HasOpenOverlayModal) return;
+
+        // Preserve native Ctrl+A / Cmd+A inside editable or already-focused TextBox controls
+        var focused = FocusManager?.GetFocusedElement();
+        if (focused is TextBox || e.Source is TextBox) return;
+
+        if (vm.IsChatsTab && vm.HasActiveSession)
+        {
+            e.Handled = true;
+            vm.EnterTranscriptSelectionMode(selectAll: true);
+        }
+        else if (vm.IsGroupsTab && vm.HasSelectedGroupRoom)
+        {
+            e.Handled = true;
+            vm.OpenGroupTranscriptSelectModal();
+        }
+    }
+
     private void OnTranscriptKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.A && (e.KeyModifiers == KeyModifiers.Control || e.KeyModifiers == KeyModifiers.Meta))
         {
+            if (FocusManager?.GetFocusedElement() is TextBox || e.Source is TextBox) return;
             if (DataContext is MainViewModel vm && vm.HasActiveSession)
             {
                 e.Handled = true;
-                vm.OpenTranscriptSelectModal();
+                vm.EnterTranscriptSelectionMode(selectAll: true);
             }
         }
+    }
+
+    private void OnSelectAllTranscriptBoxClick(object? sender, RoutedEventArgs e)
+    {
+        if (TranscriptSelectionBox is null) return;
+        TranscriptSelectionBox.Focus();
+        TranscriptSelectionBox.SelectAll();
+    }
+
+    private async void OnCopyTranscriptSelectionClick(object? sender, RoutedEventArgs e)
+    {
+        if (TranscriptSelectionBox is null) return;
+        var selected = TranscriptSelectionBox.SelectedText;
+        var text = string.IsNullOrEmpty(selected) ? (TranscriptSelectionBox.Text ?? "") : selected;
+        await CopyPreviewTextWithFeedbackAsync(text, CopyTranscriptSelBtn, () => LocStrings.Instance.CopySelectionBtn);
     }
 
     private void OnGroupComposerKeyDown(object? sender, KeyEventArgs e)

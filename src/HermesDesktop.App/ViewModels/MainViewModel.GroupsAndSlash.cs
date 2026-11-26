@@ -61,7 +61,17 @@ public sealed class GroupEventItemViewModel
 
 public sealed partial class MainViewModel
 {
-    // ---- 1. Transcript Copy & Full-Text Select Modal ----
+    public event Action? TranscriptSelectionFocusAndSelectRequested;
+
+    // ---- 1. Transcript Copy & Inline Full-Conversation Selection Mode ----
+
+    [ObservableProperty] private bool _isTranscriptSelectionMode;
+    [ObservableProperty] private string _transcriptSelectionText = "";
+
+    public bool HasOpenOverlayModal =>
+        ShowConnectOverlay || IsPreviewModalOpen || IsConfirmingDeleteSession || IsConfirmingRenameSession
+        || IsImageViewerOpen || IsSoulEditorOpen || IsCronEditorOpen
+        || IsGroupCreateModalOpen || IsGroupSettingsModalOpen;
 
     [RelayCommand]
     private void CopyMessage(MessageItemViewModel? item)
@@ -90,7 +100,23 @@ public sealed partial class MainViewModel
     }
 
     [RelayCommand]
-    public void OpenTranscriptSelectModal()
+    public void ToggleTranscriptSelectionMode()
+    {
+        if (IsTranscriptSelectionMode)
+        {
+            IsTranscriptSelectionMode = false;
+            return;
+        }
+        EnterTranscriptSelectionMode(selectAll: true);
+    }
+
+    [RelayCommand]
+    public void CloseTranscriptSelectionMode()
+    {
+        IsTranscriptSelectionMode = false;
+    }
+
+    public void EnterTranscriptSelectionMode(bool selectAll = true)
     {
         var fullText = BuildFullTranscriptPlainText();
         if (string.IsNullOrWhiteSpace(fullText))
@@ -99,11 +125,38 @@ public sealed partial class MainViewModel
             return;
         }
 
-        PreviewTitle = string.IsNullOrWhiteSpace(ActiveSessionDisplayTitle)
-            ? Loc.SelectAllTranscriptBtn
-            : $"{ActiveSessionDisplayTitle} — {Loc.SelectAllTranscriptBtn}";
+        TranscriptSelectionText = fullText;
+        IsTranscriptSelectionMode = true;
+        if (selectAll)
+        {
+            TranscriptSelectionFocusAndSelectRequested?.Invoke();
+        }
+    }
+
+    [RelayCommand]
+    public void OpenTranscriptSelectModal()
+    {
+        EnterTranscriptSelectionMode(selectAll: true);
+    }
+
+    [RelayCommand]
+    public void OpenGroupTranscriptSelectModal()
+    {
+        var sb = new StringBuilder();
+        foreach (var ev in GroupEvents)
+        {
+            if (string.IsNullOrWhiteSpace(ev.Text)) continue;
+            if (sb.Length > 0) sb.AppendLine().AppendLine();
+            var time = string.IsNullOrWhiteSpace(ev.TimeLabel) ? "" : $" ({ev.TimeLabel})";
+            sb.AppendLine($"[{ev.ActorName}{time}]");
+            sb.Append(ev.Text.TrimEnd());
+        }
+        var text = sb.ToString();
+        if (string.IsNullOrWhiteSpace(text)) return;
+
+        PreviewTitle = ActiveGroupTitle;
         PreviewFilePath = "";
-        PreviewText = fullText;
+        PreviewText = text;
         IsPreviewModalOpen = true;
         PreviewFocusAndSelectRequested?.Invoke();
     }
@@ -115,6 +168,18 @@ public sealed partial class MainViewModel
         if (string.IsNullOrWhiteSpace(fullText)) return;
         CopyTextRequested?.Invoke(fullText);
         StatusBanner = Loc.CopiedBtn;
+    }
+
+    [RelayCommand]
+    private void ExportTranscriptMarkdown()
+    {
+        var fullText = BuildFullTranscriptPlainText();
+        if (string.IsNullOrWhiteSpace(fullText)) return;
+        var safeTitle = string.IsNullOrWhiteSpace(ActiveSessionDisplayTitle)
+            ? "transcript"
+            : string.Join("_", ActiveSessionDisplayTitle.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries));
+        if (string.IsNullOrWhiteSpace(safeTitle)) safeTitle = "transcript";
+        SaveFileRequested?.Invoke($"{safeTitle}.md", null, fullText);
     }
 
     private static string ExtractCopyableMessageText(MessageItemViewModel item)
@@ -136,21 +201,37 @@ public sealed partial class MainViewModel
         var sb = new StringBuilder();
         foreach (var item in ActiveMessages)
         {
-            if (item.IsUser && !string.IsNullOrWhiteSpace(item.Content))
+            if (item.IsUser)
             {
+                if (!item.HasVisibleContent && !item.HasAttachments) continue;
                 if (sb.Length > 0) sb.AppendLine().AppendLine();
                 var ts = string.IsNullOrWhiteSpace(item.Timestamp) ? "" : $" ({item.Timestamp})";
                 sb.AppendLine($"[You{ts}]");
-                sb.Append(item.Content.TrimEnd());
+                if (item.HasVisibleContent) sb.Append(item.Content.TrimEnd());
+                if (item.HasAttachments)
+                {
+                    if (item.HasVisibleContent) sb.AppendLine();
+                    sb.Append(string.Join(", ", item.Attachments.Select(a => $"[Attachment: {a.Name}]")));
+                }
             }
-            else if ((item.IsAssistantBubble || item.IsReasoningOnly) && !item.IsProcessNarration)
+            else if (item.IsAssistantBubble || item.IsReasoningOnly)
             {
                 var body = !string.IsNullOrWhiteSpace(item.Content) ? item.Content : item.Reasoning;
-                if (string.IsNullOrWhiteSpace(body)) continue;
+                if (string.IsNullOrWhiteSpace(body) && !item.HasAttachments) continue;
                 if (sb.Length > 0) sb.AppendLine().AppendLine();
                 var ts = string.IsNullOrWhiteSpace(item.Timestamp) ? "" : $" ({item.Timestamp})";
                 sb.AppendLine($"[{ActiveReplyAuthorName}{ts}]");
-                sb.Append(body.TrimEnd());
+                if (!string.IsNullOrWhiteSpace(body)) sb.Append(body.TrimEnd());
+                if (item.HasAttachments)
+                {
+                    if (!string.IsNullOrWhiteSpace(body)) sb.AppendLine();
+                    sb.Append(string.Join(", ", item.Attachments.Select(a => $"[Attachment: {a.Name}]")));
+                }
+            }
+            else if (item.IsClarify && item.Clarify is not null)
+            {
+                if (sb.Length > 0) sb.AppendLine().AppendLine();
+                sb.Append($"[{ActiveReplyAuthorName} Clarify] {item.Clarify.Question}");
             }
             else if (item.IsSystem && !string.IsNullOrWhiteSpace(item.Content))
             {
@@ -1116,6 +1197,8 @@ public sealed partial class MainViewModel
         CanContinueGroupDiscussion = false;
         IsGroupCreateModalOpen = false;
         IsGroupSettingsModalOpen = false;
+        IsTranscriptSelectionMode = false;
+        TranscriptSelectionText = "";
         PendingRenameSession = null;
         _slashCatalog = [.. SlashCommandParser.BuiltInCommands];
         SlashSuggestions.Clear();

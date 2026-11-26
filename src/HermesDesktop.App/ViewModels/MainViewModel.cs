@@ -926,6 +926,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         _streamingAssistantMessage = null;
         _activeTools.Clear();
         ActiveMessages.Clear();
+        IsTranscriptSelectionMode = false;
         IsRunningTurn = false;
     }
 

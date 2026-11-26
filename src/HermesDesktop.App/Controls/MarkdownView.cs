@@ -253,9 +253,9 @@ public sealed class MarkdownView : UserControl
         return listPanel;
     }
 
-    private static TextBlock CreateLightweightCellText(string raw, bool isHeader)
+    private static SelectableTextBlock CreateLightweightCellText(string raw, bool isHeader)
     {
-        var tb = new TextBlock
+        var tb = new SelectableTextBlock
         {
             TextWrapping = TextWrapping.Wrap,
             FontSize = 12.5,

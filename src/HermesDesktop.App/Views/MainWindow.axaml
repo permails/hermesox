@@ -237,7 +237,7 @@
                   <Button Classes="subtle" Content="{Binding Loc.SelectAllTranscriptBtn}" FontSize="11.5" Padding="9,4"
                           ToolTip.Tip="{Binding Loc.SelectAllTranscriptTip}"
                           IsVisible="{Binding HasActiveSession}"
-                          Command="{Binding OpenTranscriptSelectModalCommand}"/>
+                          Command="{Binding ToggleTranscriptSelectionModeCommand}"/>
                   <Button Classes="ghost" Content="×" FontSize="14" Padding="8,4"
                           Foreground="{DynamicResource WinErrorBannerTextBrush}"
                           ToolTip.Tip="{Binding Loc.DeleteSessionTip}"
@@ -269,7 +269,15 @@
 
             <!-- Transcript -->
             <Grid Grid.Row="2" x:Name="TranscriptGrid">
-            <ScrollViewer x:Name="TranscriptScroller" VerticalScrollBarVisibility="Auto">
+            <ScrollViewer x:Name="TranscriptScroller" VerticalScrollBarVisibility="Auto" Focusable="True"
+                          IsVisible="{Binding !IsTranscriptSelectionMode}">
+              <ScrollViewer.ContextMenu>
+                <ContextMenu>
+                  <MenuItem Header="{Binding Loc.SelectAllTranscriptBtn}" Command="{Binding OpenTranscriptSelectModalCommand}"/>
+                  <MenuItem Header="{Binding Loc.CopyAllBtn}" Command="{Binding CopyFullTranscriptCommand}"/>
+                  <MenuItem Header="{Binding Loc.ExportFileBtn}" Command="{Binding ExportTranscriptMarkdownCommand}"/>
+                </ContextMenu>
+              </ScrollViewer.ContextMenu>
               <StackPanel Margin="4,4,18,12" Spacing="2">
                 <ItemsControl ItemsSource="{Binding ActiveMessages}">
                   <ItemsControl.ItemTemplate>
@@ -553,6 +561,56 @@
                     VerticalAlignment="Bottom"
                     Margin="0,0,22,10"
                     Click="OnJumpToLatestClick"/>
+
+            <!-- Inline Full-Conversation Select & Copy Mode -->
+            <Border IsVisible="{Binding IsTranscriptSelectionMode}"
+                    Background="{DynamicResource WinCardFillBrush}"
+                    BorderBrush="{DynamicResource WinAccentStrokeBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="12">
+              <Grid RowDefinitions="Auto,*">
+                <Border Grid.Row="0" Padding="10,8" Margin="0,0,0,10" CornerRadius="6"
+                        Background="{DynamicResource WinAccentSoftBrush}"
+                        BorderBrush="{DynamicResource WinAccentStrokeBrush}" BorderThickness="1">
+                  <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto">
+                    <TextBlock Grid.Column="0" Text="{Binding Loc.TranscriptSelectBanner}"
+                               FontSize="12" Foreground="{DynamicResource WinTextPrimaryBrush}"
+                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,10,0"/>
+                    <Button Grid.Column="1" Classes="subtle" Content="{Binding Loc.SelectAllBtn}"
+                            FontSize="11.5" Padding="8,4" Margin="0,0,6,0" Focusable="False"
+                            Click="OnSelectAllTranscriptBoxClick"/>
+                    <Button x:Name="CopyTranscriptSelBtn" Grid.Column="2" Classes="subtle" Content="{Binding Loc.CopySelectionBtn}"
+                            FontSize="11.5" Padding="8,4" Margin="0,0,6,0" Focusable="False"
+                            Click="OnCopyTranscriptSelectionClick"/>
+                    <Button Grid.Column="3" Classes="accent" Content="{Binding Loc.CopyAllBtn}"
+                            FontSize="11.5" Padding="10,4" Margin="0,0,6,0" Focusable="False"
+                            Command="{Binding CopyFullTranscriptCommand}"/>
+                    <Button Grid.Column="4" Classes="subtle" Content="{Binding Loc.ExportFileBtn}"
+                            FontSize="11.5" Padding="8,4" Margin="0,0,6,0" Focusable="False"
+                            Command="{Binding ExportTranscriptMarkdownCommand}"/>
+                    <Button Grid.Column="5" Classes="subtle" Content="{Binding Loc.BackToChatViewBtn}"
+                            FontSize="11.5" Padding="10,4"
+                            Command="{Binding CloseTranscriptSelectionModeCommand}"/>
+                  </Grid>
+                </Border>
+                <TextBox x:Name="TranscriptSelectionBox"
+                         Grid.Row="1"
+                         Text="{Binding TranscriptSelectionText, Mode=OneWay}"
+                         IsReadOnly="True"
+                         AcceptsReturn="True"
+                         TextWrapping="Wrap"
+                         VerticalAlignment="Stretch"
+                         VerticalContentAlignment="Top"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         FontSize="13.5"
+                         LineHeight="21"
+                         Padding="14"
+                         Background="{DynamicResource WinCodeBackBrush}"
+                         SelectionBrush="#5538BDF8"/>
+              </Grid>
+            </Border>
             <Border IsVisible="{Binding IsLoadingMessages}"
                     HorizontalAlignment="Center" VerticalAlignment="Center"
                     Padding="18,12" CornerRadius="8"

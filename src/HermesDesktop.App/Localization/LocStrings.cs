@@ -307,8 +307,13 @@ public sealed class LocStrings : INotifyPropertyChanged
     // Copy / Select All / Export / Rename Session
     public string CopyBtn => L("Copy", "复制");
     public string SelectTextBtn => L("Select", "框选");
-    public string SelectAllTranscriptBtn => L("Select All / Copy Chat", "全选/复制会话");
-    public string SelectAllTranscriptTip => L("Open full-transcript selectable view (Ctrl+A / drag select)", "打开全会话可框选全文窗口（支持 Ctrl+A 全选与跨段拖选）");
+    public string SelectAllBtn => L("Select All", "全选");
+    public string BackToChatViewBtn => L("Back to Chat View", "返回排版视图");
+    public string TranscriptSelectBanner => L(
+        "Full-Conversation Text Selection — Drag across any messages, Ctrl+A to select all, Ctrl+C to copy (Esc to exit)",
+        "全会话纯文本框选模式 — 支持跨消息任意拖选、Ctrl+A 全选、Ctrl+C 复制（按 Esc 返回）");
+    public string SelectAllTranscriptBtn => L("Select / Copy Chat", "框选 / 全选对话");
+    public string SelectAllTranscriptTip => L("Switch to full-conversation selectable mode (Ctrl+A / Cmd+A)", "切换到全对话可框选与全选复制模式（支持 Ctrl+A / Cmd+A）");
     public string ExportFileBtn => L("Export / Save", "导出 / 下载");
     public string ExportFileTip => L("Save or export this file to disk", "导出或下载此文件到本地");
     public string RenameSessionBtn => L("Rename", "重命名");
