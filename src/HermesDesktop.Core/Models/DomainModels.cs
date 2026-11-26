@@ -664,6 +664,19 @@ public sealed record ModelProviderOption(
             : Localization.AppLocalization.T("Public · Add Key", "公共 · 未配Key");
 }
 
+public sealed record FunctionalApiKeyInfo(
+    string Key,
+    string Category,
+    string Label,
+    bool IsSet);
+
+public sealed record ToolsetBackendSnapshot(
+    string ToolsetName,
+    string? ActiveProvider,
+    string? ActiveSearchBackend,
+    string? ActiveExtractBackend,
+    IReadOnlyList<FunctionalApiKeyInfo> SetEnvVars);
+
 public sealed record BotRosterSnapshot(
     IReadOnlyList<BotProfile> Profiles,
     bool SupportsBotProtocol);

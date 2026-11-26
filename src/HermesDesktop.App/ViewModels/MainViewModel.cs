@@ -2699,10 +2699,20 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         SoulEditorSlugInput = "";
         SoulEditorDescription = "";
         SoulEditorText = "";
-        SoulEditorCloneFrom = SoulCloneOptions.Contains("default") ? "default" : "(Fresh profile)";
+        _suppressCloneFromTrack = true;
+        try
+        {
+            SoulEditorCloneFrom = GetDefaultCloneSourceProfileName();
+        }
+        finally
+        {
+            _suppressCloneFromTrack = false;
+        }
+        _cloneFromManuallyEdited = false;
         SoulEditorNoSkills = false;
         SoulEditorShareAuth = true;
         InitializeFirstBotProviderPreset();
+        _ = LoadInheritedFunctionalApisAsync();
         SoulUseCustomProviderModel = false;
         SoulManualProviderInput = false;
         SoulEditorProviderInput = _firstBotProvider;
@@ -2934,6 +2944,12 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                     {
                         AppDiagnostics.Log("BOT_MODEL_WARN", $"Post-create model pin warning for {slug}: {mex.Message}");
                     }
+                }
+
+                var inheritSource = cloneFrom ?? GetDefaultCloneSourceProfileName();
+                if (!string.IsNullOrWhiteSpace(inheritSource) && inheritSource != "(Fresh profile)")
+                {
+                    await InheritFunctionalToolBackendsAfterCreateAsync(inheritSource, slug);
                 }
 
                 var titleTrimmed = SoulEditorTitleInput.Trim();

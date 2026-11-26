@@ -383,6 +383,169 @@ public sealed class HermesRestClient : IDisposable
             .ToList();
     }
 
+    public async Task<IReadOnlyList<FunctionalApiKeyInfo>> GetFunctionalApiKeysAsync(
+        string? profile = null,
+        CancellationToken ct = default)
+    {
+        var hasCustomProfile = !string.IsNullOrWhiteSpace(profile)
+            && !string.Equals(profile.Trim(), "default", StringComparison.OrdinalIgnoreCase);
+        var envPath = hasCustomProfile
+            ? $"/api/env?profile={Uri.EscapeDataString(profile!.Trim())}"
+            : "/api/env";
+        var byKey = new Dictionary<string, FunctionalApiKeyInfo>(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            using var doc = await GetJsonAsync(envPath, ct);
+            foreach (var item in DecodeFunctionalApiKeys(doc.RootElement))
+            {
+                byKey[item.Key] = item;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            HermesDesktop.Core.Diagnostics.AppDiagnostics.Log("REST_ENV", $"GET {envPath} failed: {ex.Message}");
+        }
+
+        // Toolset config endpoints (e.g. web/config for Tavily/Firecrawl) can also surface functional env_vars
+        foreach (var toolset in new[] { "web", "image_gen", "tts" })
+        {
+            var snap = await GetToolsetConfigSnapshotAsync(toolset, profile, ct);
+            if (snap is null) continue;
+            foreach (var envVar in snap.SetEnvVars)
+            {
+                if (!byKey.ContainsKey(envVar.Key))
+                {
+                    byKey[envVar.Key] = envVar;
+                }
+            }
+        }
+
+        return byKey.Values
+            .OrderBy(k => k.Category, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(k => k.Key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    public static IReadOnlyList<FunctionalApiKeyInfo> DecodeFunctionalApiKeys(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object) return [];
+        var map = root.TryGetProperty("env", out var inner) && inner.ValueKind == JsonValueKind.Object
+            ? inner
+            : root;
+
+        var list = new List<FunctionalApiKeyInfo>();
+        foreach (var prop in map.EnumerateObject())
+        {
+            if (prop.Value.ValueKind != JsonValueKind.Object) continue;
+            var row = prop.Value;
+            var category = FirstNonEmpty(GetString(row, "category")) ?? "";
+            if (string.Equals(category, "provider", StringComparison.OrdinalIgnoreCase)) continue;
+            if (GetBool(row, "is_set") != true) continue;
+
+            var isPassword = GetBool(row, "is_password") == true;
+            var keyUpper = prop.Name.ToUpperInvariant();
+            var looksFunctionalKey = isPassword
+                || keyUpper.EndsWith("_API_KEY", StringComparison.Ordinal)
+                || keyUpper.EndsWith("_KEY", StringComparison.Ordinal)
+                || keyUpper.EndsWith("_TOKEN", StringComparison.Ordinal)
+                || keyUpper.EndsWith("_SECRET", StringComparison.Ordinal)
+                || category.Equals("tools", StringComparison.OrdinalIgnoreCase)
+                || category.Equals("web", StringComparison.OrdinalIgnoreCase)
+                || category.Equals("search", StringComparison.OrdinalIgnoreCase)
+                || category.Equals("voice", StringComparison.OrdinalIgnoreCase)
+                || category.Equals("tts", StringComparison.OrdinalIgnoreCase)
+                || category.Equals("image_gen", StringComparison.OrdinalIgnoreCase)
+                || category.Equals("mcp", StringComparison.OrdinalIgnoreCase);
+
+            if (!looksFunctionalKey) continue;
+
+            var label = FirstNonEmpty(GetString(row, "label"), GetString(row, "description"), prop.Name) ?? prop.Name;
+            list.Add(new FunctionalApiKeyInfo(prop.Name, string.IsNullOrEmpty(category) ? "tools" : category, label, true));
+        }
+
+        return list;
+    }
+
+    public async Task<ToolsetBackendSnapshot?> GetToolsetConfigSnapshotAsync(
+        string toolsetName,
+        string? profile = null,
+        CancellationToken ct = default)
+    {
+        var safeName = Uri.EscapeDataString(toolsetName.Trim());
+        var hasCustomProfile = !string.IsNullOrWhiteSpace(profile)
+            && !string.Equals(profile.Trim(), "default", StringComparison.OrdinalIgnoreCase);
+        var path = hasCustomProfile
+            ? $"/api/tools/toolsets/{safeName}/config?profile={Uri.EscapeDataString(profile!.Trim())}"
+            : $"/api/tools/toolsets/{safeName}/config";
+
+        try
+        {
+            using var doc = await GetJsonAsync(path, ct);
+            return DecodeToolsetConfigSnapshot(toolsetName.Trim(), doc.RootElement);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
+    public async Task SetToolsetProviderAsync(
+        string toolsetName,
+        string provider,
+        string? capability = null,
+        string? profile = null,
+        CancellationToken ct = default)
+    {
+        var safeName = Uri.EscapeDataString(toolsetName.Trim());
+        var hasCustomProfile = !string.IsNullOrWhiteSpace(profile)
+            && !string.Equals(profile.Trim(), "default", StringComparison.OrdinalIgnoreCase);
+        var path = hasCustomProfile
+            ? $"/api/tools/toolsets/{safeName}/provider?profile={Uri.EscapeDataString(profile!.Trim())}"
+            : $"/api/tools/toolsets/{safeName}/provider";
+
+        var body = new Dictionary<string, object?> { ["provider"] = provider.Trim() };
+        if (!string.IsNullOrWhiteSpace(capability)) body["capability"] = capability.Trim();
+        if (hasCustomProfile) body["profile"] = profile!.Trim();
+
+        await SendJsonAsync(HttpMethod.Put, path, body, ct);
+    }
+
+    public static ToolsetBackendSnapshot DecodeToolsetConfigSnapshot(string toolsetName, JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            return new ToolsetBackendSnapshot(toolsetName, null, null, null, []);
+        }
+
+        var activeProvider = FirstNonEmpty(GetString(root, "active_provider"));
+        var activeSearch = FirstNonEmpty(GetString(root, "active_search_backend"));
+        var activeExtract = FirstNonEmpty(GetString(root, "active_extract_backend"));
+
+        var envVars = new List<FunctionalApiKeyInfo>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (root.TryGetProperty("providers", out var providersEl) && providersEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var p in providersEl.EnumerateArray())
+            {
+                if (p.ValueKind != JsonValueKind.Object) continue;
+                var providerName = FirstNonEmpty(GetString(p, "name"), GetString(p, "web_backend"), toolsetName) ?? toolsetName;
+                if (p.TryGetProperty("env_vars", out var varsEl) && varsEl.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var ev in varsEl.EnumerateArray())
+                    {
+                        if (ev.ValueKind != JsonValueKind.Object) continue;
+                        var key = FirstNonEmpty(GetString(ev, "key"));
+                        if (key is null || GetBool(ev, "is_set") != true || !seen.Add(key)) continue;
+                        envVars.Add(new FunctionalApiKeyInfo(key, toolsetName, providerName, true));
+                    }
+                }
+            }
+        }
+
+        return new ToolsetBackendSnapshot(toolsetName, activeProvider, activeSearch, activeExtract, envVars);
+    }
+
     public async Task<IReadOnlyList<BotProfile>> GetProfilesAsync(CancellationToken ct = default)
     {
         using var doc = await GetJsonAsync("/api/profiles", ct);

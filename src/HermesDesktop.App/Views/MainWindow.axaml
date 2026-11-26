@@ -1664,6 +1664,9 @@
                   <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,12,0">
                     <TextBlock Text="{Binding Loc.StartFromLabel}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
                     <ComboBox ItemsSource="{Binding SoulCloneOptions}" SelectedItem="{Binding SoulEditorCloneFrom}" HorizontalAlignment="Stretch"/>
+                    <TextBlock Text="{Binding InheritedFunctionalApisSummary}"
+                               IsVisible="{Binding InheritedFunctionalApisSummary, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                               FontSize="11" Foreground="{DynamicResource WinAccentTextBrush}" TextWrapping="Wrap"/>
                   </StackPanel>
                   <CheckBox Grid.Column="1" IsChecked="{Binding SoulEditorShareAuth}" Content="{Binding Loc.ShareAuth}" VerticalAlignment="Bottom" Margin="0,0,12,4"/>
                   <CheckBox Grid.Column="2" IsChecked="{Binding SoulEditorNoSkills}" Content="{Binding Loc.NoSkills}" VerticalAlignment="Bottom" Margin="0,0,0,4"/>

@@ -1535,12 +1535,27 @@ public sealed partial class MainViewModel
     [ObservableProperty] private string _soulProviderApiKeyInput = "";
     [ObservableProperty] private bool _isSavingProviderApiKey;
     [ObservableProperty] private string _soulProviderApiKeyFeedback = "";
+    [ObservableProperty] private string _inheritedFunctionalApisSummary = "";
 
     private string _soulOriginalProvider = "";
     private string _soulOriginalModel = "";
     private string _firstBotProvider = "";
     private string _firstBotModel = "";
     private bool _syncingProviderSelection;
+    private bool _suppressCloneFromTrack;
+    private bool _cloneFromManuallyEdited;
+
+    partial void OnSoulEditorCloneFromChanged(string value)
+    {
+        if (!_suppressCloneFromTrack)
+        {
+            _cloneFromManuallyEdited = true;
+        }
+        if (IsCreatingSoul)
+        {
+            _ = LoadInheritedFunctionalApisAsync();
+        }
+    }
 
     public bool HasAnyAvailableModelProviders => AvailableModelProviders.Count > 0;
     public bool HasModelsForSelectedProvider => AvailableModelsForSelectedProvider.Count > 0;
@@ -1697,6 +1712,143 @@ public sealed partial class MainViewModel
     private async Task RefreshBotModelProvidersAsync()
     {
         await LoadBotModelProvidersAsync(refresh: true);
+    }
+
+    private string GetDefaultCloneSourceProfileName()
+    {
+        var firstNonDefault = ProfileChips.FirstOrDefault(p =>
+            !p.Profile.IsDefault
+            && (!string.IsNullOrWhiteSpace(p.Model) || !string.IsNullOrWhiteSpace(p.Profile.Provider)))
+            ?? ProfileChips.FirstOrDefault(p => !p.Profile.IsDefault);
+
+        if (firstNonDefault is not null && SoulCloneOptions.Contains(firstNonDefault.Name))
+        {
+            return firstNonDefault.Name;
+        }
+        if (SoulCloneOptions.Contains("default"))
+        {
+            return "default";
+        }
+        var anyFirst = ProfileChips.FirstOrDefault();
+        if (anyFirst is not null && SoulCloneOptions.Contains(anyFirst.Name))
+        {
+            return anyFirst.Name;
+        }
+        return "(Fresh profile)";
+    }
+
+    private async Task LoadInheritedFunctionalApisAsync()
+    {
+        var source = SoulEditorCloneFrom;
+        if (string.IsNullOrWhiteSpace(source) || source == "(Fresh profile)")
+        {
+            InheritedFunctionalApisSummary = AppLocalization.T(
+                "Fresh profile selected — functional APIs (Tavily, etc.) will not be cloned unless a source bot is chosen.",
+                "当前为全新空白模板；若需默认继承 Tavily 等功能性 API，请选择首个智能体作为模板。");
+            return;
+        }
+
+        if (_restClient is null)
+        {
+            InheritedFunctionalApisSummary = AppLocalization.T(
+                $"Functional APIs (e.g. Tavily), tools & skills inherit from @{source}.",
+                $"将默认从首个智能体 @{source} 继承 Tavily 等所有功能性 API、工具与技能配置。");
+            return;
+        }
+
+        try
+        {
+            var sourceKeys = await _restClient.GetFunctionalApiKeysAsync(source);
+            if (!_cloneFromManuallyEdited && !string.Equals(source, "default", StringComparison.OrdinalIgnoreCase) && SoulCloneOptions.Contains("default") && sourceKeys.Count == 0)
+            {
+                var defaultKeys = await _restClient.GetFunctionalApiKeysAsync("default");
+                if (defaultKeys.Count > 0)
+                {
+                    _suppressCloneFromTrack = true;
+                    try
+                    {
+                        SoulEditorCloneFrom = "default";
+                    }
+                    finally
+                    {
+                        _suppressCloneFromTrack = false;
+                    }
+                    source = "default";
+                    sourceKeys = defaultKeys;
+                }
+            }
+
+            if (sourceKeys.Count > 0)
+            {
+                var preview = string.Join(", ", sourceKeys.Take(4).Select(k => k.Key));
+                var suffix = sourceKeys.Count > 4 ? $" (+{sourceKeys.Count - 4})" : "";
+                InheritedFunctionalApisSummary = AppLocalization.T(
+                    $"Inherits functional APIs from @{source}: {preview}{suffix}",
+                    $"默认从 @{source} 继承功能性 API（{preview}{suffix}）及工具/技能配置");
+            }
+            else
+            {
+                InheritedFunctionalApisSummary = AppLocalization.T(
+                    $"Inherits functional APIs (e.g. Tavily), tools & skills from @{source}.",
+                    $"默认从 @{source} 继承所有功能性 API（如 Tavily）、工具集与技能配置。");
+            }
+        }
+        catch
+        {
+            InheritedFunctionalApisSummary = AppLocalization.T(
+                $"Inherits functional APIs (e.g. Tavily), tools & skills from @{source}.",
+                $"默认从 @{source} 继承所有功能性 API（如 Tavily）、工具集与技能配置。");
+        }
+    }
+
+    private async Task InheritFunctionalToolBackendsAfterCreateAsync(string sourceProfile, string targetProfile)
+    {
+        if (_restClient is null) return;
+        try
+        {
+            // Sync active functional backends (web: search/extract like Tavily/Firecrawl, image_gen, tts)
+            var webSource = await _restClient.GetToolsetConfigSnapshotAsync("web", sourceProfile);
+            var webTarget = await _restClient.GetToolsetConfigSnapshotAsync("web", targetProfile);
+            if (webSource is not null)
+            {
+                if (!string.IsNullOrWhiteSpace(webSource.ActiveSearchBackend)
+                    && !string.Equals(webSource.ActiveSearchBackend, webTarget?.ActiveSearchBackend, StringComparison.OrdinalIgnoreCase))
+                {
+                    await _restClient.SetToolsetProviderAsync("web", webSource.ActiveSearchBackend, "search", targetProfile);
+                }
+                if (!string.IsNullOrWhiteSpace(webSource.ActiveExtractBackend)
+                    && !string.Equals(webSource.ActiveExtractBackend, webTarget?.ActiveExtractBackend, StringComparison.OrdinalIgnoreCase))
+                {
+                    await _restClient.SetToolsetProviderAsync("web", webSource.ActiveExtractBackend, "extract", targetProfile);
+                }
+            }
+
+            foreach (var toolset in new[] { "image_gen", "tts" })
+            {
+                var srcSnap = await _restClient.GetToolsetConfigSnapshotAsync(toolset, sourceProfile);
+                if (srcSnap is null || string.IsNullOrWhiteSpace(srcSnap.ActiveProvider)) continue;
+                var dstSnap = await _restClient.GetToolsetConfigSnapshotAsync(toolset, targetProfile);
+                if (!string.Equals(srcSnap.ActiveProvider, dstSnap?.ActiveProvider, StringComparison.OrdinalIgnoreCase))
+                {
+                    await _restClient.SetToolsetProviderAsync(toolset, srcSnap.ActiveProvider, null, targetProfile);
+                }
+            }
+
+            var srcKeys = await _restClient.GetFunctionalApiKeysAsync(sourceProfile);
+            var dstKeys = await _restClient.GetFunctionalApiKeysAsync(targetProfile);
+            var dstSet = new HashSet<string>(dstKeys.Select(k => k.Key), StringComparer.OrdinalIgnoreCase);
+            var missing = srcKeys.Where(k => !dstSet.Contains(k.Key)).Select(k => k.Key).ToList();
+            if (missing.Count > 0)
+            {
+                HermesDesktop.Core.Diagnostics.AppDiagnostics.Log(
+                    "BOT_INHERIT_WARN",
+                    $"Profile {targetProfile} missing functional env keys from {sourceProfile}: {string.Join(", ", missing)}");
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            HermesDesktop.Core.Diagnostics.AppDiagnostics.Log("BOT_INHERIT_WARN", $"InheritFunctionalToolBackendsAfterCreateAsync failed: {ex.Message}");
+        }
     }
 
     private void InitializeFirstBotProviderPreset()

@@ -241,4 +241,72 @@ public class ModelProviderCatalogTests
         var zai = merged.Single(p => p.Slug == "zai");
         Assert.Equal("Z.AI", zai.DisplayName);
     }
+
+    [Fact]
+    public void DecodeFunctionalApiKeys_ExtractsTavilyAndToolKeysWhileExcludingLlmProviders()
+    {
+        using var envDoc = JsonDocument.Parse("""
+        {
+          "TAVILY_API_KEY": {
+            "category": "tools",
+            "is_set": true,
+            "is_password": true,
+            "description": "Tavily web search API key"
+          },
+          "FIRECRAWL_API_KEY": {
+            "category": "web",
+            "is_set": true,
+            "is_password": true,
+            "label": "Firecrawl"
+          },
+          "EXA_API_KEY": {
+            "category": "tools",
+            "is_set": false,
+            "is_password": true
+          },
+          "OPENROUTER_API_KEY": {
+            "category": "provider",
+            "is_set": true,
+            "is_password": true,
+            "provider": "openrouter"
+          }
+        }
+        """);
+
+        var keys = HermesRestClient.DecodeFunctionalApiKeys(envDoc.RootElement);
+        Assert.Equal(2, keys.Count);
+        Assert.Contains(keys, k => k.Key == "TAVILY_API_KEY" && k.IsSet);
+        Assert.Contains(keys, k => k.Key == "FIRECRAWL_API_KEY" && k.IsSet);
+        Assert.DoesNotContain(keys, k => k.Key == "OPENROUTER_API_KEY");
+        Assert.DoesNotContain(keys, k => k.Key == "EXA_API_KEY");
+    }
+
+    [Fact]
+    public void DecodeToolsetConfigSnapshot_ExtractsTavilySearchBackendAndSetEnvVars()
+    {
+        using var doc = JsonDocument.Parse("""
+        {
+          "active_search_backend": "tavily",
+          "active_extract_backend": "firecrawl",
+          "providers": [
+            {
+              "name": "Tavily",
+              "web_backend": "tavily",
+              "env_vars": [{ "key": "TAVILY_API_KEY", "is_set": true }]
+            },
+            {
+              "name": "Firecrawl",
+              "web_backend": "firecrawl",
+              "env_vars": [{ "key": "FIRECRAWL_API_KEY", "is_set": false }]
+            }
+          ]
+        }
+        """);
+
+        var snap = HermesRestClient.DecodeToolsetConfigSnapshot("web", doc.RootElement);
+        Assert.Equal("tavily", snap.ActiveSearchBackend);
+        Assert.Equal("firecrawl", snap.ActiveExtractBackend);
+        Assert.Single(snap.SetEnvVars);
+        Assert.Equal("TAVILY_API_KEY", snap.SetEnvVars[0].Key);
+    }
 }
