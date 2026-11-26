@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:HermesDesktop.App.ViewModels"
         xmlns:models="using:HermesDesktop.Core.Models"
+        xmlns:rpc="using:HermesDesktop.Core.Rpc"
         xmlns:conv="using:HermesDesktop.App.Converters"
         xmlns:controls="using:HermesDesktop.App.Controls"
         xmlns:webview="clr-namespace:AvaloniaWebView;assembly=Avalonia.WebView"
@@ -141,6 +142,9 @@
                     <Grid ColumnDefinitions="Auto,*,Auto" Background="Transparent">
                       <Grid.ContextMenu>
                         <ContextMenu>
+                          <MenuItem Header="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.RenameSessionBtn}"
+                                    Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).RequestRenameSessionCommand}"
+                                    CommandParameter="{Binding}"/>
                           <MenuItem Header="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.DeleteSession}"
                                     Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).RequestDeleteSessionCommand}"
                                     CommandParameter="{Binding}"/>
@@ -214,7 +218,14 @@
             <Border Grid.Row="0" Padding="14,10" Classes="card" Margin="0,0,0,10">
               <Grid ColumnDefinitions="*,Auto">
                 <StackPanel Grid.Column="0" Spacing="2">
-                  <TextBlock Text="{Binding ActiveSessionDisplayTitle}" FontSize="15.5" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                  <StackPanel Orientation="Horizontal" Spacing="6">
+                    <TextBlock Text="{Binding ActiveSessionDisplayTitle}" FontSize="15.5" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                    <Button Classes="ghost" Content="✎" FontSize="12" Padding="6,2" VerticalAlignment="Center"
+                            ToolTip.Tip="{Binding Loc.RenameSessionTitle}"
+                            IsVisible="{Binding HasActiveSession}"
+                            Command="{Binding RequestRenameSessionCommand}"
+                            CommandParameter="{Binding ActiveSession}"/>
+                  </StackPanel>
                   <StackPanel Orientation="Horizontal" Spacing="10">
                     <TextBlock Text="{Binding CurrentModelLabel}" FontSize="11.5" Foreground="{DynamicResource WinAccentTextBrush}" FontWeight="Medium"/>
                     <TextBlock Text="{Binding CurrentCwd}" FontSize="11.5" Foreground="{DynamicResource WinTextTertiaryBrush}" TextTrimming="CharacterEllipsis"/>
@@ -223,6 +234,10 @@
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                   <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsRunningTurn}" Width="68" Height="4" Foreground="{DynamicResource WinAccentFillBrush}" VerticalAlignment="Center"/>
                   <Button Classes="subtle" Content="{Binding Loc.Stop}" IsVisible="{Binding IsRunningTurn}" Command="{Binding InterruptTurnCommand}"/>
+                  <Button Classes="subtle" Content="{Binding Loc.SelectAllTranscriptBtn}" FontSize="11.5" Padding="9,4"
+                          ToolTip.Tip="{Binding Loc.SelectAllTranscriptTip}"
+                          IsVisible="{Binding HasActiveSession}"
+                          Command="{Binding OpenTranscriptSelectModalCommand}"/>
                   <Button Classes="ghost" Content="×" FontSize="14" Padding="8,4"
                           Foreground="{DynamicResource WinErrorBannerTextBrush}"
                           ToolTip.Tip="{Binding Loc.DeleteSessionTip}"
@@ -253,7 +268,7 @@
             </Border>
 
             <!-- Transcript -->
-            <Grid Grid.Row="2">
+            <Grid Grid.Row="2" x:Name="TranscriptGrid">
             <ScrollViewer x:Name="TranscriptScroller" VerticalScrollBarVisibility="Auto">
               <StackPanel Margin="4,4,18,12" Spacing="2">
                 <ItemsControl ItemsSource="{Binding ActiveMessages}">
@@ -266,13 +281,27 @@
                               BorderThickness="1" CornerRadius="8,8,4,8" Padding="14,10">
                         <StackPanel Spacing="6">
                           <controls:AttachmentGalleryView IsVisible="{Binding HasAttachments}"
+                                                        CompactThumbnails="True"
                                                         Attachments="{Binding Attachments}"
                                                         MediaBytesLoader="{Binding $parent[Window].((vm:MainViewModel)DataContext).MediaBytesLoader}"
                                                         ImageClickCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenImageViewerCommand}"
-                                                        FileClickCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenPreviewFileCommand}"/>
+                                                        FileClickCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenPreviewFileCommand}"
+                                                        DownloadCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).DownloadRemoteFileCommand}"/>
                           <SelectableTextBlock IsVisible="{Binding HasVisibleContent}" Text="{Binding Content}" TextWrapping="Wrap" FontSize="13.5" LineHeight="20" Foreground="{DynamicResource WinTextPrimaryBrush}"/>
-                          <TextBlock Text="{Binding Timestamp}" FontSize="10" Foreground="{DynamicResource WinTextTertiaryBrush}" HorizontalAlignment="Right"
-                                     IsVisible="{Binding Timestamp, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                          <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                            <Button Classes="ghost" Content="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.SelectTextBtn}"
+                                    FontSize="10" Padding="4,1" Foreground="{DynamicResource WinTextTertiaryBrush}"
+                                    IsVisible="{Binding HasVisibleContent}"
+                                    Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenMessageSelectModalCommand}"
+                                    CommandParameter="{Binding}"/>
+                            <Button Classes="ghost" Content="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.CopyBtn}"
+                                    FontSize="10" Padding="4,1" Foreground="{DynamicResource WinTextTertiaryBrush}"
+                                    IsVisible="{Binding HasVisibleContent}"
+                                    Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).CopyMessageCommand}"
+                                    CommandParameter="{Binding}"/>
+                            <TextBlock Text="{Binding Timestamp}" FontSize="10" Foreground="{DynamicResource WinTextTertiaryBrush}" VerticalAlignment="Center"
+                                       IsVisible="{Binding Timestamp, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                          </StackPanel>
                         </StackPanel>
                       </Border>
 
@@ -334,17 +363,31 @@
                               BorderThickness="1" CornerRadius="8" Padding="16,12">
                         <StackPanel Spacing="10">
                           <!-- Agent Identity Attribution Header -->
-                          <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Border Width="20" Height="20" CornerRadius="10" Background="{DynamicResource WinAccentFillBrush}">
-                              <TextBlock Text="{Binding $parent[Window].((vm:MainViewModel)DataContext).ActiveReplyAuthorInitial}"
-                                         FontSize="10.5" FontWeight="Bold" Foreground="{DynamicResource WinAccentForegroundBrush}"
-                                         HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                            </Border>
-                            <TextBlock Text="{Binding $parent[Window].((vm:MainViewModel)DataContext).ActiveReplyAuthorName}"
-                                       FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource WinTextPrimaryBrush}" VerticalAlignment="Center"/>
-                            <TextBlock Text="{Binding Timestamp}" FontSize="11" Foreground="{DynamicResource WinTextTertiaryBrush}" VerticalAlignment="Center"
-                                       IsVisible="{Binding Timestamp, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
-                          </StackPanel>
+                          <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                              <Border Width="20" Height="20" CornerRadius="10" Background="{DynamicResource WinAccentFillBrush}">
+                                <TextBlock Text="{Binding $parent[Window].((vm:MainViewModel)DataContext).ActiveReplyAuthorInitial}"
+                                           FontSize="10.5" FontWeight="Bold" Foreground="{DynamicResource WinAccentForegroundBrush}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                              </Border>
+                              <TextBlock Text="{Binding $parent[Window].((vm:MainViewModel)DataContext).ActiveReplyAuthorName}"
+                                         FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource WinTextPrimaryBrush}" VerticalAlignment="Center"/>
+                              <TextBlock Text="{Binding Timestamp}" FontSize="11" Foreground="{DynamicResource WinTextTertiaryBrush}" VerticalAlignment="Center"
+                                         IsVisible="{Binding Timestamp, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                              <Button Classes="ghost" Content="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.SelectTextBtn}"
+                                      FontSize="11" Padding="6,2" Foreground="{DynamicResource WinTextTertiaryBrush}"
+                                      IsVisible="{Binding HasVisibleContent}"
+                                      Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenMessageSelectModalCommand}"
+                                      CommandParameter="{Binding}"/>
+                              <Button Classes="ghost" Content="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.CopyBtn}"
+                                      FontSize="11" Padding="6,2" Foreground="{DynamicResource WinTextTertiaryBrush}"
+                                      IsVisible="{Binding HasVisibleContent}"
+                                      Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).CopyMessageCommand}"
+                                      CommandParameter="{Binding}"/>
+                            </StackPanel>
+                          </Grid>
 
                           <StackPanel IsVisible="{Binding HasReasoning}" Spacing="6">
                             <Button Classes="ghost" Padding="4,2" HorizontalAlignment="Left" Command="{Binding ToggleReasoningCommand}">
@@ -361,11 +404,13 @@
                                                         Attachments="{Binding Attachments}"
                                                         MediaBytesLoader="{Binding $parent[Window].((vm:MainViewModel)DataContext).MediaBytesLoader}"
                                                         ImageClickCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenImageViewerCommand}"
-                                                        FileClickCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenPreviewFileCommand}"/>
+                                                        FileClickCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenPreviewFileCommand}"
+                                                        DownloadCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).DownloadRemoteFileCommand}"/>
                           <controls:MarkdownView IsVisible="{Binding HasVisibleContent}"
                                                  Markdown="{Binding Content}"
                                                  PreviewCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenInAppPreviewCommand}"
                                                  BrowserCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenPreviewFileCommand}"
+                                                 DownloadCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).DownloadRemoteFileCommand}"
                                                  MediaBytesLoader="{Binding $parent[Window].((vm:MainViewModel)DataContext).MediaBytesLoader}"
                                                  ImageViewerCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenImageViewerCommand}"/>
                         </StackPanel>
@@ -572,6 +617,33 @@
                   <TextBlock Text="{Binding Loc.UploadingAttachments}" FontSize="11.5" Foreground="{DynamicResource WinTextSecondaryBrush}" VerticalAlignment="Center"/>
                 </StackPanel>
 
+                <!-- Slash Command Autocomplete Popup -->
+                <Border IsVisible="{Binding IsSlashSuggestionsVisible}" Padding="6" CornerRadius="6"
+                        Background="{DynamicResource WinCardSecondaryBrush}"
+                        BorderBrush="{DynamicResource WinAccentStrokeBrush}" BorderThickness="1">
+                  <ScrollViewer MaxHeight="170" VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding SlashSuggestions}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="rpc:SlashCommandDescriptor">
+                          <Button Classes="ghost" Padding="8,5" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                  Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ApplySlashSuggestionCommand}"
+                                  CommandParameter="{Binding}">
+                            <Grid ColumnDefinitions="Auto,Auto,*">
+                              <TextBlock Grid.Column="0" Text="{Binding Name}" FontFamily="{StaticResource WinMonoFontFamily}"
+                                         FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource WinAccentTextBrush}" Margin="0,0,8,0"/>
+                              <TextBlock Grid.Column="1" Text="{Binding ArgsHint}" FontFamily="{StaticResource WinMonoFontFamily}"
+                                         FontSize="11.5" Foreground="{DynamicResource WinTextTertiaryBrush}" Margin="0,0,10,0"
+                                         IsVisible="{Binding ArgsHint, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                              <TextBlock Grid.Column="2" Text="{Binding Description}" FontSize="11.5"
+                                         Foreground="{DynamicResource WinTextSecondaryBrush}" TextTrimming="CharacterEllipsis"/>
+                            </Grid>
+                          </Button>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </ScrollViewer>
+                </Border>
+
                 <Grid ColumnDefinitions="Auto,*,Auto">
                   <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" Margin="0,0,8,0" VerticalAlignment="Bottom">
                     <Button Classes="subtle" Content="📎" Padding="9,7"
@@ -583,7 +655,9 @@
                             Click="OnVoiceDictationClick"/>
                   </StackPanel>
                   <TextBox Grid.Column="1" x:Name="ComposerInput" Text="{Binding ComposerText}"
-                           AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="140"
+                           AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="150"
+                           ScrollViewer.VerticalScrollBarVisibility="Auto"
+                           ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                            Watermark="{Binding Loc.ComposerWatermark}"/>
                   <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Bottom" Margin="8,0,0,0">
                     <Button Classes="subtle" Content="{Binding Loc.StopTurn}" IsVisible="{Binding IsRunningTurn}" Command="{Binding InterruptTurnCommand}"/>
@@ -678,6 +752,208 @@
               </Border>
             </Grid>
           </Border>
+        </Grid>
+
+        <!-- 1.5 GROUPS TAB (Multi-Agent Group Chats) -->
+        <Grid IsVisible="{Binding IsGroupsTab}" ColumnDefinitions="280,*">
+          <!-- Left Group Rooms List -->
+          <Border Grid.Column="0" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="0,0,1,0" Padding="12">
+            <Grid RowDefinitions="Auto,Auto,*">
+              <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,10">
+                <TextBlock Grid.Column="0" Text="{Binding Loc.GroupsTitle}" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                <Button Grid.Column="1" Classes="accent" Content="{Binding Loc.NewGroupBtn}" Padding="10,5" FontSize="11.5"
+                        Margin="0,0,6,0" Command="{Binding OpenCreateGroupModalCommand}" IsEnabled="{Binding IsGroupsSupported}"/>
+                <Button Grid.Column="2" Classes="subtle" Content="{Binding Loc.RefreshGroupsBtn}" Padding="8,5" FontSize="11.5"
+                        Command="{Binding RefreshGroupRoomsCommand}"/>
+              </Grid>
+
+              <Border Grid.Row="1" IsVisible="{Binding GroupStatusNotice, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                      Margin="0,0,0,8" Padding="10,8" CornerRadius="6"
+                      Background="{DynamicResource WinErrorBannerFillBrush}"
+                      BorderBrush="{DynamicResource WinErrorBannerStrokeBrush}" BorderThickness="1">
+                <TextBlock Text="{Binding GroupStatusNotice}" FontSize="11.5" TextWrapping="Wrap"
+                           Foreground="{DynamicResource WinErrorBannerTextBrush}"/>
+              </Border>
+
+              <Grid Grid.Row="2">
+                <TextBlock Text="{Binding Loc.GroupRoomsEmpty}" IsVisible="{Binding HasNoGroupRooms}"
+                           FontSize="12.5" Foreground="{DynamicResource WinTextTertiaryBrush}" TextWrapping="Wrap"
+                           Margin="8,24" TextAlignment="Center"/>
+                <ListBox Classes="sessions" ItemsSource="{Binding GroupRooms}" SelectedItem="{Binding SelectedGroupRoom}" Background="Transparent">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="models:GroupRoom">
+                      <StackPanel Spacing="3" Margin="4,4">
+                        <Grid ColumnDefinitions="*,Auto">
+                          <TextBlock Grid.Column="0" Text="{Binding Name}" FontSize="13.5" FontWeight="SemiBold"
+                                     Foreground="{DynamicResource WinTextPrimaryBrush}" TextTrimming="CharacterEllipsis"/>
+                          <Border Grid.Column="1" CornerRadius="4" Padding="6,1" Margin="6,0,0,0"
+                                  Background="{DynamicResource WinAccentSoftBrush}">
+                            <TextBlock Text="{Binding MemberCountLabel}" FontSize="10.5" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource WinAccentTextBrush}"/>
+                          </Border>
+                        </Grid>
+                        <TextBlock Text="{Binding LastMessagePreview}" FontSize="11.5" Foreground="{DynamicResource WinTextSecondaryBrush}"
+                                   TextTrimming="CharacterEllipsis" MaxLines="1"
+                                   IsVisible="{Binding LastMessagePreview, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                      </StackPanel>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </Grid>
+            </Grid>
+          </Border>
+
+          <!-- Right Active Group Chat Area -->
+          <Grid Grid.Column="1" Margin="16,12">
+            <TextBlock Text="{Binding Loc.SelectGroupHint}" IsVisible="{Binding !HasSelectedGroupRoom}"
+                       FontSize="14" Foreground="{DynamicResource WinTextTertiaryBrush}"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+
+            <Grid IsVisible="{Binding HasSelectedGroupRoom}" RowDefinitions="Auto,Auto,Auto,*,Auto">
+              <!-- Room Header -->
+              <Border Grid.Row="0" Classes="card" Padding="14,10" Margin="0,0,0,8">
+                <Grid ColumnDefinitions="*,Auto">
+                  <StackPanel Grid.Column="0" Spacing="2">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <TextBlock Text="{Binding ActiveGroupTitle}" FontSize="15.5" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                      <Border CornerRadius="4" Padding="6,1" Background="{DynamicResource WinControlFillBrush}" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding GroupMemberSummaryText}" FontSize="11" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                      </Border>
+                    </StackPanel>
+                    <TextBlock Text="{Binding GroupDriverBanner}" FontSize="11.5"
+                               Foreground="{DynamicResource WinAccentTextBrush}" TextTrimming="CharacterEllipsis"
+                               IsVisible="{Binding GroupDriverBanner, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsGroupRunning}" Width="60" Height="4"
+                                 Foreground="{DynamicResource WinAccentFillBrush}" VerticalAlignment="Center"/>
+                    <Button Classes="subtle" Content="{Binding Loc.GroupStopBtn}" IsVisible="{Binding IsGroupRunning}"
+                            Command="{Binding StopGroupRunCommand}"/>
+                    <Button Classes="accent" Content="{Binding Loc.GroupContinueBtn}" IsVisible="{Binding CanContinueGroupDiscussion}"
+                            Command="{Binding ContinueGroupDiscussionCommand}"/>
+                    <Button Classes="subtle" Content="{Binding Loc.GroupSettingsBtn}" Command="{Binding OpenGroupSettingsModalCommand}"/>
+                    <Button Classes="ghost" Content="{Binding Loc.GroupDisbandBtn}" Foreground="{DynamicResource WinErrorBannerTextBrush}"
+                            Command="{Binding DisbandGroupRoomCommand}"/>
+                  </StackPanel>
+                </Grid>
+              </Border>
+
+              <!-- Bot Member Mention Chips -->
+              <ItemsControl Grid.Row="1" ItemsSource="{Binding ActiveGroupMembers}" Margin="0,0,0,8">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <WrapPanel Orientation="Horizontal"/>
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:GroupMemberStatusViewModel">
+                    <Button Classes="subtle" Padding="8,4" Margin="0,0,6,4" CornerRadius="12"
+                            ToolTip.Tip="{Binding Summary}"
+                            Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).InsertGroupMentionCommand}"
+                            CommandParameter="{Binding}">
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Ellipse Width="7" Height="7" Fill="{DynamicResource WinAccentFillBrush}"
+                                 IsVisible="{Binding IsWorking}" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding DisplayName}" FontSize="11.5" FontWeight="SemiBold"/>
+                        <TextBlock Text="{Binding HandleDisplay}" FontSize="11" Foreground="{DynamicResource WinTextTertiaryBrush}"/>
+                      </StackPanel>
+                    </Button>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+
+              <!-- Pending Group Action Approvals -->
+              <ItemsControl Grid.Row="2" ItemsSource="{Binding GroupPendingApprovals}" IsVisible="{Binding HasGroupPendingApprovals}" Margin="0,0,0,8">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="models:GroupPendingApproval">
+                    <Border Background="{DynamicResource WinApprovalFillBrush}" BorderBrush="{DynamicResource WinApprovalStrokeBrush}"
+                            BorderThickness="1" CornerRadius="6" Padding="12,8" Margin="0,0,0,6">
+                      <Grid ColumnDefinitions="*,Auto,Auto">
+                        <StackPanel Grid.Column="0" Spacing="2" Margin="0,0,10,0">
+                          <TextBlock Text="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.GroupApprovalRequired}"
+                                     FontSize="12" FontWeight="Bold" Foreground="{DynamicResource WinErrorBannerTextBrush}"/>
+                          <TextBlock Text="{Binding Command}" FontFamily="{StaticResource WinMonoFontFamily}" FontSize="12" TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <Button Grid.Column="1" Classes="accent" Content="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.GroupApproveBtn}"
+                                Margin="0,0,6,0" Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ApproveGroupActionCommand}"
+                                CommandParameter="{Binding}"/>
+                        <Button Grid.Column="2" Classes="subtle" Content="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.GroupRejectBtn}"
+                                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).RejectGroupActionCommand}"
+                                CommandParameter="{Binding}"/>
+                      </Grid>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+
+              <!-- Group Log Transcript -->
+              <ScrollViewer Grid.Row="3" x:Name="GroupTranscriptScroller" VerticalScrollBarVisibility="Auto">
+                <ItemsControl ItemsSource="{Binding GroupEvents}" Margin="4,4,16,12">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:GroupEventItemViewModel">
+                      <StackPanel Margin="0,0,0,8">
+                        <!-- User Message -->
+                        <Border IsVisible="{Binding IsUser}" HorizontalAlignment="Right" MaxWidth="700"
+                                Background="{DynamicResource WinUserBubbleFillBrush}" BorderBrush="{DynamicResource WinUserBubbleStrokeBrush}"
+                                BorderThickness="1" CornerRadius="8,8,4,8" Padding="12,8">
+                          <StackPanel Spacing="4">
+                            <SelectableTextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="13.5" LineHeight="20"/>
+                            <TextBlock Text="{Binding TimeLabel}" FontSize="10" Foreground="{DynamicResource WinTextTertiaryBrush}" HorizontalAlignment="Right"/>
+                          </StackPanel>
+                        </Border>
+
+                        <!-- Bot Member Message -->
+                        <Border IsVisible="{Binding IsMember}" HorizontalAlignment="Left" MaxWidth="800"
+                                Background="{DynamicResource WinCardFillBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}"
+                                BorderThickness="1" CornerRadius="8" Padding="14,10">
+                          <StackPanel Spacing="8">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                              <Border Width="20" Height="20" CornerRadius="10" Background="{DynamicResource WinAccentFillBrush}">
+                                <TextBlock Text="{Binding ActorInitial}" FontSize="10.5" FontWeight="Bold"
+                                           Foreground="{DynamicResource WinAccentForegroundBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                              </Border>
+                              <TextBlock Text="{Binding ActorName}" FontSize="12.5" FontWeight="SemiBold"/>
+                              <TextBlock Text="{Binding TimeLabel}" FontSize="11" Foreground="{DynamicResource WinTextTertiaryBrush}" VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <controls:AttachmentGalleryView IsVisible="{Binding HasAttachments}"
+                                                          Attachments="{Binding Attachments}"
+                                                          MediaBytesLoader="{Binding $parent[Window].((vm:MainViewModel)DataContext).MediaBytesLoader}"
+                                                          ImageClickCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenImageViewerCommand}"
+                                                          FileClickCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenPreviewFileCommand}"
+                                                          DownloadCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).DownloadRemoteFileCommand}"/>
+                            <controls:MarkdownView Markdown="{Binding Text}"
+                                                   PreviewCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenInAppPreviewCommand}"
+                                                   BrowserCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenPreviewFileCommand}"
+                                                   DownloadCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).DownloadRemoteFileCommand}"
+                                                   MediaBytesLoader="{Binding $parent[Window].((vm:MainViewModel)DataContext).MediaBytesLoader}"
+                                                   ImageViewerCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenImageViewerCommand}"/>
+                          </StackPanel>
+                        </Border>
+
+                        <!-- System Event -->
+                        <TextBlock IsVisible="{Binding IsSystem}" Text="{Binding Text}" FontSize="11.5"
+                                   Foreground="{DynamicResource WinTextTertiaryBrush}" HorizontalAlignment="Center"/>
+                      </StackPanel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </ScrollViewer>
+
+              <!-- Group Composer -->
+              <Border Grid.Row="4" Classes="card" Padding="10" Margin="0,8,0,0">
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBox Grid.Column="0" x:Name="GroupComposerInput" Text="{Binding GroupComposerText}"
+                           AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="130"
+                           ScrollViewer.VerticalScrollBarVisibility="Auto"
+                           ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                           Watermark="{Binding Loc.GroupComposerWatermark}"/>
+                  <Button Grid.Column="1" Classes="accent" Content="{Binding Loc.Send}" Margin="8,0,0,0"
+                          VerticalAlignment="Bottom" IsEnabled="{Binding !IsSendingGroupMessage}"
+                          Command="{Binding SendGroupMessageCommand}"/>
+                </Grid>
+              </Border>
+            </Grid>
+          </Grid>
         </Grid>
 
         <!-- 2. BOTS TAB -->
@@ -1072,16 +1348,19 @@
     <Border Grid.RowSpan="3" IsVisible="{Binding IsPreviewModalOpen}" Background="{DynamicResource WinSmokeScrimBrush}">
       <Border Classes="dialog" Width="840" Height="660" MaxWidth="1040" MaxHeight="760" Padding="20" HorizontalAlignment="Center" VerticalAlignment="Center">
         <Grid RowDefinitions="Auto,*">
-          <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto,Auto" Margin="0,0,0,12">
+          <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto,Auto,Auto" Margin="0,0,0,12">
             <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,12,0" Spacing="2">
               <TextBlock Text="{Binding PreviewTitle}" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
               <TextBlock Text="{Binding PreviewFilePath}" FontSize="11" Foreground="{DynamicResource WinTextTertiaryBrush}" TextTrimming="CharacterEllipsis"/>
             </StackPanel>
-            <Button x:Name="CopyPreviewSelectionBtn" Grid.Column="1" Classes="subtle" Content="{Binding Loc.CopySelectionBtn}"
+            <Button Grid.Column="1" Classes="subtle" Content="{Binding Loc.ExportFileBtn}"
+                    ToolTip.Tip="{Binding Loc.ExportFileTip}"
+                    Margin="0,0,8,0" Command="{Binding ExportCurrentPreviewFileCommand}"/>
+            <Button x:Name="CopyPreviewSelectionBtn" Grid.Column="2" Classes="subtle" Content="{Binding Loc.CopySelectionBtn}"
                     Focusable="False" Margin="0,0,8,0" Click="OnCopyPreviewSelectionClick"/>
-            <Button x:Name="CopyPreviewAllBtn" Grid.Column="2" Classes="accent" Content="{Binding Loc.CopyAllBtn}"
+            <Button x:Name="CopyPreviewAllBtn" Grid.Column="3" Classes="accent" Content="{Binding Loc.CopyAllBtn}"
                     Focusable="False" Margin="0,0,8,0" Click="OnCopyPreviewAllClick"/>
-            <Button Grid.Column="3" Classes="subtle" Content="{Binding Loc.Close}" Command="{Binding ClosePreviewModalCommand}"/>
+            <Button Grid.Column="4" Classes="subtle" Content="{Binding Loc.Close}" Command="{Binding ClosePreviewModalCommand}"/>
           </Grid>
           <TextBox x:Name="PreviewTextBox"
                    Grid.Row="1"
@@ -1126,6 +1405,107 @@
                     Background="#C42B1C" Foreground="White" FontWeight="SemiBold"
                     IsEnabled="{Binding CanConfirmOrCancelDeleteSession}"
                     Command="{Binding ConfirmDeleteSessionCommand}"/>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </Border>
+
+    <!-- Rename Session Modal -->
+    <Border Grid.RowSpan="3" IsVisible="{Binding IsConfirmingRenameSession}" Background="{DynamicResource WinSmokeScrimBrush}">
+      <Border Classes="dialog" Width="440" Padding="24,20" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <StackPanel Spacing="14">
+          <TextBlock Text="{Binding Loc.RenameSessionTitle}" FontSize="17" FontWeight="SemiBold"/>
+          <TextBox Text="{Binding RenameSessionInput}" Watermark="{Binding Loc.RenameSessionWatermark}"/>
+          <Border IsVisible="{Binding HasRenameSessionError}" Padding="10,8" CornerRadius="6"
+                  Background="{DynamicResource WinErrorBannerFillBrush}"
+                  BorderBrush="{DynamicResource WinErrorBannerStrokeBrush}" BorderThickness="1">
+            <TextBlock Text="{Binding RenameSessionError}" FontSize="12" TextWrapping="Wrap"
+                       Foreground="{DynamicResource WinErrorBannerTextBrush}"/>
+          </Border>
+          <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+            <Button Classes="subtle" Content="{Binding Loc.Cancel}" IsEnabled="{Binding !IsRenamingSession}"
+                    Command="{Binding CancelRenameSessionCommand}"/>
+            <Button Classes="accent" Content="{Binding Loc.SaveBtn}" IsEnabled="{Binding !IsRenamingSession}"
+                    Command="{Binding ConfirmRenameSessionCommand}"/>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </Border>
+
+    <!-- Create Multi-Agent Group Modal -->
+    <Border Grid.RowSpan="3" IsVisible="{Binding IsGroupCreateModalOpen}" Background="{DynamicResource WinSmokeScrimBrush}">
+      <Border Classes="dialog" Width="480" MaxHeight="620" Padding="24,20" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <StackPanel Spacing="14">
+          <TextBlock Text="{Binding Loc.GroupCreateTitle}" FontSize="17" FontWeight="SemiBold"/>
+          <StackPanel Spacing="4">
+            <TextBlock Text="{Binding Loc.GroupNameLabel}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+            <TextBox Text="{Binding GroupCreateName}" Watermark="{Binding Loc.GroupNameWatermark}"/>
+          </StackPanel>
+          <StackPanel Spacing="6">
+            <TextBlock Text="{Binding Loc.GroupSelectMembersLabel}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+            <ScrollViewer MaxHeight="240" VerticalScrollBarVisibility="Auto">
+              <ItemsControl ItemsSource="{Binding GroupCreateMemberChoices}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:GroupBotChoiceViewModel">
+                    <CheckBox IsChecked="{Binding IsSelected}" Margin="0,2">
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="13"/>
+                        <TextBlock Text="{Binding ModelDisplay}" FontSize="11.5" Foreground="{DynamicResource WinTextTertiaryBrush}" VerticalAlignment="Center"/>
+                      </StackPanel>
+                    </CheckBox>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+          </StackPanel>
+          <Border IsVisible="{Binding HasGroupCreateError}" Padding="10,8" CornerRadius="6"
+                  Background="{DynamicResource WinErrorBannerFillBrush}"
+                  BorderBrush="{DynamicResource WinErrorBannerStrokeBrush}" BorderThickness="1">
+            <TextBlock Text="{Binding GroupCreateError}" FontSize="12" TextWrapping="Wrap"
+                       Foreground="{DynamicResource WinErrorBannerTextBrush}"/>
+          </Border>
+          <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+            <Button Classes="subtle" Content="{Binding Loc.Cancel}" IsEnabled="{Binding !IsCreatingGroup}"
+                    Command="{Binding CloseCreateGroupModalCommand}"/>
+            <Button Classes="accent" Content="{Binding Loc.GroupCreateSubmit}" IsEnabled="{Binding !IsCreatingGroup}"
+                    Command="{Binding ConfirmCreateGroupCommand}"/>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </Border>
+
+    <!-- Group Room Settings Modal -->
+    <Border Grid.RowSpan="3" IsVisible="{Binding IsGroupSettingsModalOpen}" Background="{DynamicResource WinSmokeScrimBrush}">
+      <Border Classes="dialog" Width="500" MaxHeight="660" Padding="24,20" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <StackPanel Spacing="12">
+          <TextBlock Text="{Binding Loc.GroupSettingsBtn}" FontSize="17" FontWeight="SemiBold"/>
+          <StackPanel Spacing="4">
+            <TextBlock Text="{Binding Loc.GroupNameLabel}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+            <TextBox Text="{Binding GroupEditName}"/>
+          </StackPanel>
+          <StackPanel Spacing="4">
+            <TextBlock Text="{Binding Loc.GroupRoutingLabel}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+            <ComboBox ItemsSource="{Binding GroupRoutingModes}" SelectedItem="{Binding GroupEditRoutingMode}" HorizontalAlignment="Stretch"/>
+          </StackPanel>
+          <StackPanel Spacing="4">
+            <TextBlock Text="{Binding Loc.GroupPurposeLabel}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+            <TextBox Text="{Binding GroupEditPurpose}" AcceptsReturn="True" TextWrapping="Wrap" Height="70"/>
+          </StackPanel>
+          <StackPanel Spacing="4">
+            <TextBlock Text="{Binding Loc.GroupNotesLabel}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+            <TextBox Text="{Binding GroupEditNotes}" AcceptsReturn="True" TextWrapping="Wrap" Height="90"/>
+          </StackPanel>
+          <Border IsVisible="{Binding HasGroupSettingsError}" Padding="10,8" CornerRadius="6"
+                  Background="{DynamicResource WinErrorBannerFillBrush}"
+                  BorderBrush="{DynamicResource WinErrorBannerStrokeBrush}" BorderThickness="1">
+            <TextBlock Text="{Binding GroupSettingsError}" FontSize="12" TextWrapping="Wrap"
+                       Foreground="{DynamicResource WinErrorBannerTextBrush}"/>
+          </Border>
+          <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+            <Button Classes="subtle" Content="{Binding Loc.Cancel}" IsEnabled="{Binding !IsSavingGroupSettings}"
+                    Command="{Binding CloseGroupSettingsModalCommand}"/>
+            <Button Classes="accent" Content="{Binding Loc.GroupSaveContextBtn}" IsEnabled="{Binding !IsSavingGroupSettings}"
+                    Command="{Binding SaveGroupSettingsCommand}"/>
           </StackPanel>
         </StackPanel>
       </Border>

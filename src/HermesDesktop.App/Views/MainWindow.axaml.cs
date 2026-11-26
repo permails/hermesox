@@ -41,8 +41,22 @@ public partial class MainWindow : Window
                 vm.TranscriptScrollRequested += force => _transcriptAutoScroll?.RequestScrollToBottom(force);
                 vm.HtmlPreviewContentLoaded += html => LoadPreviewHtml(html, vm.HtmlPreviewZoom);
                 vm.HtmlPreviewZoomChanged += zoom => _ = ApplyPreviewZoomAsync(zoom);
+                vm.PreviewFocusAndSelectRequested += () => Dispatcher.UIThread.Post(() =>
+                {
+                    PreviewTextBox?.Focus();
+                    PreviewTextBox?.SelectAll();
+                });
+                vm.CopyTextRequested += text => _ = CopyTextSilentlyAsync(text);
+                vm.SaveFileRequested += (fileName, bytes, text) => Dispatcher.UIThread.Post(() =>
+                    _ = SaveExportedFileAsync(fileName, bytes, text));
+                vm.GroupTranscriptScrollRequested += () => Dispatcher.UIThread.Post(() => GroupTranscriptScroller?.ScrollToEnd());
             }
         };
+
+        if (TranscriptGrid is not null)
+        {
+            TranscriptGrid.AddHandler(InputElement.KeyDownEvent, OnTranscriptKeyDown, RoutingStrategies.Tunnel);
+        }
 
         if (ComposerDropTarget is not null)
         {
@@ -53,6 +67,11 @@ public partial class MainWindow : Window
         if (ComposerInput is not null)
         {
             ComposerInput.AddHandler(InputElement.KeyDownEvent, OnComposerKeyDown, RoutingStrategies.Tunnel);
+        }
+
+        if (GroupComposerInput is not null)
+        {
+            GroupComposerInput.AddHandler(InputElement.KeyDownEvent, OnGroupComposerKeyDown, RoutingStrategies.Tunnel);
         }
 
         if (InlineBesideComposerInput is not null)
@@ -100,6 +119,15 @@ public partial class MainWindow : Window
 
     private void OnComposerKeyDown(object? sender, KeyEventArgs e)
     {
+        if (e.Key == Key.Tab && e.KeyModifiers == KeyModifiers.None
+            && DataContext is MainViewModel vmSlash && vmSlash.IsSlashSuggestionsVisible
+            && vmSlash.SlashSuggestions.Count > 0)
+        {
+            e.Handled = true;
+            vmSlash.ApplySlashSuggestionCommand.Execute(vmSlash.SlashSuggestions[0]);
+            return;
+        }
+
         var isPlainEnter = e.Key == Key.Enter && e.KeyModifiers == KeyModifiers.None;
         var isComboSend = e.Key == Key.Enter
             && (e.KeyModifiers == KeyModifiers.Control || e.KeyModifiers == KeyModifiers.Meta);
@@ -370,6 +398,84 @@ public partial class MainWindow : Window
         catch
         {
             // Clipboard access may fail transiently on locked desktops
+        }
+    }
+
+    private void OnTranscriptKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.A && (e.KeyModifiers == KeyModifiers.Control || e.KeyModifiers == KeyModifiers.Meta))
+        {
+            if (DataContext is MainViewModel vm && vm.HasActiveSession)
+            {
+                e.Handled = true;
+                vm.OpenTranscriptSelectModal();
+            }
+        }
+    }
+
+    private void OnGroupComposerKeyDown(object? sender, KeyEventArgs e)
+    {
+        var isPlainEnter = e.Key == Key.Enter && e.KeyModifiers == KeyModifiers.None;
+        var isComboSend = e.Key == Key.Enter
+            && (e.KeyModifiers == KeyModifiers.Control || e.KeyModifiers == KeyModifiers.Meta);
+
+        if (isPlainEnter || isComboSend)
+        {
+            e.Handled = true;
+            if (DataContext is MainViewModel vm && vm.SendGroupMessageCommand.CanExecute(null))
+            {
+                vm.SendGroupMessageCommand.Execute(null);
+            }
+        }
+    }
+
+    private async Task CopyTextSilentlyAsync(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        try
+        {
+            var top = TopLevel.GetTopLevel(this);
+            if (top?.Clipboard is not null)
+            {
+                await top.Clipboard.SetTextAsync(text);
+            }
+        }
+        catch
+        {
+            // Ignore clipboard errors
+        }
+    }
+
+    private async Task SaveExportedFileAsync(string suggestedFileName, byte[]? bytes, string? text)
+    {
+        try
+        {
+            var top = TopLevel.GetTopLevel(this);
+            if (top?.StorageProvider is null) return;
+
+            var ext = Path.GetExtension(suggestedFileName);
+            var file = await top.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = LocStrings.Instance.ExportFileBtn,
+                SuggestedFileName = suggestedFileName,
+                DefaultExtension = string.IsNullOrWhiteSpace(ext) ? null : ext.TrimStart('.')
+            });
+            if (file is null) return;
+
+            await using var stream = await file.OpenWriteAsync();
+            if (bytes is { Length: > 0 })
+            {
+                await stream.WriteAsync(bytes);
+            }
+            else if (text is not null)
+            {
+                await using var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(false));
+                await writer.WriteAsync(text);
+            }
+        }
+        catch
+        {
+            // Ignore picker cancellation or transient IO errors
         }
     }
 }

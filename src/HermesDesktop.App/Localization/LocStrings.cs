@@ -303,4 +303,47 @@ public sealed class LocStrings : INotifyPropertyChanged
     public string SaveAndConnect => L("Save & Connect", "保存并连接");
     public string EditingServerPrefix => L("Editing saved server:", "正在编辑已保存服务器：");
     public string NewServerBtn => L("New instead", "改为新建");
+
+    // Copy / Select All / Export / Rename Session
+    public string CopyBtn => L("Copy", "复制");
+    public string SelectTextBtn => L("Select", "框选");
+    public string SelectAllTranscriptBtn => L("Select All / Copy Chat", "全选/复制会话");
+    public string SelectAllTranscriptTip => L("Open full-transcript selectable view (Ctrl+A / drag select)", "打开全会话可框选全文窗口（支持 Ctrl+A 全选与跨段拖选）");
+    public string ExportFileBtn => L("Export / Save", "导出 / 下载");
+    public string ExportFileTip => L("Save or export this file to disk", "导出或下载此文件到本地");
+    public string RenameSessionBtn => L("Rename", "重命名");
+    public string RenameSessionTitle => L("Rename Session", "重命名会话");
+    public string RenameSessionWatermark => L("Enter a new session title…", "输入新的会话标题…");
+    public string SaveBtn => L("Save", "保存");
+
+    // Slash commands
+    public string SlashCommandExecuting => L("Running slash command…", "正在执行命令…");
+    public string SlashCommandCompressing => L("Compressing session context…", "正在压缩会话上下文…");
+    public string SlashCommandDone => L("Command completed", "命令已执行");
+
+    // Multi-Agent Group Chats
+    public string GroupsTitle => L("Agent Groups", "多智能体群组");
+    public string NewGroupBtn => L("New Group", "新建群组");
+    public string RefreshGroupsBtn => L("Refresh", "刷新");
+    public string GroupRoomsEmpty => L("No group chats yet. Create a room with 2-6 bots to collaborate.", "暂无群聊。点击「新建群组」拉起 2-6 个智能体协同对话。");
+    public string SelectGroupHint => L("Select a group room or create a new one.", "选择一个群组或新建多智能体群组。");
+    public string GroupComposerWatermark => L("Message the group… use @handle to target a bot (Enter to send)", "在群里发言… 可输入 @bot 指定智能体（Enter 发送）");
+    public string GroupSettingsBtn => L("Room Settings", "群设置");
+    public string GroupStopBtn => L("Stop Run", "停止讨论");
+    public string GroupContinueBtn => L("Continue Discussion", "继续讨论");
+    public string GroupDisbandBtn => L("Disband", "解散群组");
+    public string GroupRenameBtn => L("Rename Room", "重命名群组");
+    public string GroupCreateTitle => L("Create Multi-Agent Group", "创建多智能体群组");
+    public string GroupNameLabel => L("Room Name", "群组名称");
+    public string GroupNameWatermark => L("e.g. Architecture Review", "例如：架构评审群");
+    public string GroupSelectMembersLabel => L("Select 2-6 Bots", "选择 2-6 个群成员智能体");
+    public string GroupCreateSubmit => L("Create Group", "创建群组");
+    public string GroupPurposeLabel => L("Purpose / Goal", "群目标 / 背景");
+    public string GroupNotesLabel => L("Shared Notes", "群共享备忘");
+    public string GroupRoutingLabel => L("Routing Mode", "路由模式");
+    public string GroupSaveContextBtn => L("Save Context", "保存设置");
+    public string GroupMembersCountFormat => L("{0} bots", "{0} 个智能体");
+    public string GroupApprovalRequired => L("Group Approval Required", "群成员请求命令授权");
+    public string GroupApproveBtn => L("Approve", "允许");
+    public string GroupRejectBtn => L("Reject", "拒绝");
 }

@@ -32,6 +32,9 @@ public sealed class MarkdownView : UserControl
     public static readonly StyledProperty<ICommand?> ImageViewerCommandProperty =
         AvaloniaProperty.Register<MarkdownView, ICommand?>(nameof(ImageViewerCommand));
 
+    public static readonly StyledProperty<ICommand?> DownloadCommandProperty =
+        AvaloniaProperty.Register<MarkdownView, ICommand?>(nameof(DownloadCommand));
+
     public string? Markdown
     {
         get => GetValue(MarkdownProperty);
@@ -60,6 +63,12 @@ public sealed class MarkdownView : UserControl
     {
         get => GetValue(ImageViewerCommandProperty);
         set => SetValue(ImageViewerCommandProperty, value);
+    }
+
+    public ICommand? DownloadCommand
+    {
+        get => GetValue(DownloadCommandProperty);
+        set => SetValue(DownloadCommandProperty, value);
     }
 
     private readonly StackPanel _root = new() { Spacing = 8 };
@@ -675,6 +684,8 @@ public sealed class MarkdownView : UserControl
                     new ScrollViewer
                     {
                         HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+                        AllowAutoHide = false,
+                        Padding = new Thickness(0, 0, 0, 14),
                         Content = codeText
                     }
                 }
@@ -743,9 +754,11 @@ public sealed class MarkdownView : UserControl
                 [Grid.ColumnSpanProperty] = colCount
             });
 
+            var maxCellWidth = colCount <= 3 ? 340d : 240d;
             for (var c = 0; c < colCount; c++)
             {
                 var cellText = CreateLightweightCellText(c < headers.Count ? headers[c] : "", isHeader: true);
+                cellText.MaxWidth = maxCellWidth;
                 cellText.Margin = new Thickness(10, 7);
                 cellText[Grid.RowProperty] = 0;
                 cellText[Grid.ColumnProperty] = c;
@@ -768,6 +781,7 @@ public sealed class MarkdownView : UserControl
                 {
                     var text = c < rows[r].Count ? rows[r][c] : "";
                     var cellText = CreateLightweightCellText(text, isHeader: false);
+                    cellText.MaxWidth = maxCellWidth;
                     cellText.Margin = new Thickness(10, 6);
                     cellText[Grid.RowProperty] = r + 1;
                     cellText[Grid.ColumnProperty] = c;
@@ -786,6 +800,8 @@ public sealed class MarkdownView : UserControl
             Child = new ScrollViewer
             {
                 HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+                AllowAutoHide = false,
+                Padding = new Thickness(0, 0, 0, 14),
                 Content = CreateTableGrid(shownLimit)
             }
         };
@@ -812,6 +828,8 @@ public sealed class MarkdownView : UserControl
                 tableBorder.Child = new ScrollViewer
                 {
                     HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+                    AllowAutoHide = false,
+                    Padding = new Thickness(0, 0, 0, 14),
                     Content = CreateTableGrid(rows.Count)
                 };
                 expandBtn.IsVisible = false;
@@ -848,7 +866,7 @@ public sealed class MarkdownView : UserControl
             }
         };
 
-        var headerRow = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto,Auto") };
+        var headerRow = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto,Auto,Auto") };
         headerRow.Children.Add(new Border
         {
             Width = 32,
@@ -904,7 +922,30 @@ public sealed class MarkdownView : UserControl
             headerRow.Children.Add(browserBtn);
         }
 
-        previewBtn[Grid.ColumnProperty] = 3;
+        var downloadBtn = new Button
+        {
+            Content = AppLocalization.T("Export", "导出"),
+            FontSize = 11.5,
+            Padding = new Thickness(10, 6),
+            CornerRadius = new CornerRadius(4),
+            Background = FluentPalette.ControlFill,
+            BorderBrush = FluentPalette.ControlStroke,
+            BorderThickness = new Thickness(1),
+            Foreground = FluentPalette.TextPrimary,
+            Margin = new Thickness(8, 0, 6, 0)
+        };
+        ToolTip.SetTip(downloadBtn, AppLocalization.T("Export / Save file to disk", "导出或下载此文件到本地"));
+        downloadBtn.Click += (_, _) =>
+        {
+            if (DownloadCommand?.CanExecute(filePath) == true)
+            {
+                DownloadCommand.Execute(filePath);
+            }
+        };
+        downloadBtn[Grid.ColumnProperty] = 3;
+        headerRow.Children.Add(downloadBtn);
+
+        previewBtn[Grid.ColumnProperty] = 4;
         headerRow.Children.Add(previewBtn);
 
         return new Border

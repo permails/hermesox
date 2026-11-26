@@ -364,6 +364,14 @@ public sealed class HermesRestClient : IDisposable
             profile,
             ct);
 
+    public Task RenameSessionAsync(string sessionId, string title, string? profile = null, CancellationToken ct = default) =>
+        SendSessionMutationAsync(
+            HttpMethod.Patch,
+            sessionId,
+            new Dictionary<string, object?> { ["title"] = title },
+            profile,
+            ct);
+
     private sealed record SessionMutationSnapshot(long Revision, long? Generation);
 
     private static string? NormalizeNonDefaultProfile(string? profile) =>

@@ -9,7 +9,7 @@ public class V2TabLayoutTests
     public void StandardLayout_HasExpectedDefaultOrderAndHiddenOptionalTabs()
     {
         var layout = new V2TabLayout();
-        Assert.Equal([V2Tab.Bots, V2Tab.Chats, V2Tab.Tasks, V2Tab.Settings], layout.Shown);
+        Assert.Equal([V2Tab.Bots, V2Tab.Chats, V2Tab.Groups, V2Tab.Tasks, V2Tab.Settings], layout.Shown);
         Assert.Contains(V2Tab.Pulse, layout.Hidden);
         Assert.Contains(V2Tab.Artifacts, layout.Hidden);
     }

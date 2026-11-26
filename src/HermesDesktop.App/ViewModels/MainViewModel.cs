@@ -162,6 +162,10 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
     public event Action<bool>? TranscriptScrollRequested;
     public event Action<bool>? BesideScrollRequested;
+    public event Action? PreviewFocusAndSelectRequested;
+    public event Action<string>? CopyTextRequested;
+    public event Action<string, byte[]?, string?>? SaveFileRequested;
+    public event Action? GroupTranscriptScrollRequested;
     public Func<string, Task<string?>> PreviewHtmlLoader => LoadPreviewHtmlAsync;
     public Func<string, Task<byte[]?>> MediaBytesLoader => LoadMediaBytesAsync;
 
@@ -331,7 +335,9 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private CancellationTokenSource? _serverMaintenanceCts;
     private static readonly double[] HtmlZoomSteps = [0.50, 0.65, 0.75, 0.85, 1.00, 1.15, 1.30, 1.50];
 
-    public bool IsHtmlPreviewWebViewVisible => IsHtmlPreviewPaneOpen && !ShowConnectOverlay && !IsPreviewModalOpen && !IsImageViewerOpen && !IsSoulEditorOpen && !IsCronEditorOpen && !IsConfirmingDeleteSession;
+    public bool IsHtmlPreviewWebViewVisible =>
+        IsHtmlPreviewPaneOpen && !ShowConnectOverlay && !IsPreviewModalOpen && !IsImageViewerOpen && !IsSoulEditorOpen && !IsCronEditorOpen && !IsConfirmingDeleteSession
+        && !IsConfirmingRenameSession && !IsGroupCreateModalOpen && !IsGroupSettingsModalOpen;
     public string HtmlPreviewZoomLabel => $"{Math.Round(HtmlPreviewZoom * 100):0}%";
     public LocStrings Loc => LocStrings.Instance;
     public bool IsSystemLanguage => AppLocalization.Mode == AppLanguageMode.System;
@@ -425,6 +431,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     public string EditingServerBanner => IsEditingSavedDashboard ? $"{Loc.EditingServerPrefix} {ConnectLabel}" : "";
     public bool IsChatsTab => SelectedTab == V2Tab.Chats;
     public bool IsBotsTab => SelectedTab == V2Tab.Bots;
+    public bool IsGroupsTab => SelectedTab == V2Tab.Groups;
     public bool IsTasksTab => SelectedTab == V2Tab.Tasks;
     public bool IsPulseTab => SelectedTab == V2Tab.Pulse;
     public bool IsArtifactsTab => SelectedTab == V2Tab.Artifacts;
@@ -488,17 +495,22 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     {
         OnPropertyChanged(nameof(IsChatsTab));
         OnPropertyChanged(nameof(IsBotsTab));
+        OnPropertyChanged(nameof(IsGroupsTab));
         OnPropertyChanged(nameof(IsTasksTab));
         OnPropertyChanged(nameof(IsPulseTab));
         OnPropertyChanged(nameof(IsArtifactsTab));
         OnPropertyChanged(nameof(IsSettingsTab));
+        OnPropertyChanged(nameof(IsSlashSuggestionsVisible));
 
         foreach (var item in VisibleTabs)
         {
             item.IsSelected = item.Tab == value;
         }
 
+        if (value != V2Tab.Groups) StopGroupPollingIfInactive();
+
         if (value == V2Tab.Tasks) _ = RefreshTasksTabAsync();
+        else if (value == V2Tab.Groups) _ = EnsureGroupsLoadedAsync();
         else if (value == V2Tab.Pulse) _ = RefreshPulseTabAsync();
         else if (value == V2Tab.Artifacts) _ = RefreshArtifactsTabAsync();
         else if (value == V2Tab.Settings && IsConnected && !IsCheckingHermesUpdate && !IsHermesUpdateRunning && string.IsNullOrEmpty(HermesUpdateStatusText))
@@ -610,6 +622,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         {
             _cache.SaveDraft(DraftKey(ActiveSession.Id), value);
         }
+        UpdateSlashSuggestions(value);
     }
 
     private void UpdateProfileChipSelection()
@@ -895,6 +908,11 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         StatusBanner = $"Connected · {dashboard.Label}";
 
         await RefreshProfilesAndSessionsAsync();
+        _ = SyncSlashCatalogAsync();
+        if (SelectedTab == V2Tab.Groups)
+        {
+            _ = EnsureGroupsLoadedAsync();
+        }
     }
 
     private void ClearActiveTranscriptState(string? runtimeSessionId = null)
@@ -987,6 +1005,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         PulseStatusNotice = null;
         ArtifactsStatusNotice = null;
         NeedsYouCount = 0;
+        ResetGroupsAndSlashState();
 
         _previewHtmlCache.Clear();
         _mediaBytesCache.Clear();
@@ -1767,6 +1786,10 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
         if (ActiveSession is null)
         {
+            if (!hasAttachments && await TryHandleSlashCommandAsync(text))
+            {
+                return;
+            }
             if (!_wsClient.IsConnected)
             {
                 StatusBanner = AppLocalization.T("Not connected to Hermes.", "尚未连接到 Hermes。");
@@ -1778,6 +1801,10 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 ComposerText = text;
                 return;
             }
+        }
+        else if (!hasAttachments && await TryHandleSlashCommandAsync(text))
+        {
+            return;
         }
 
         var sourceSession = ActiveSession;
@@ -4687,6 +4714,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        DisposeGroupsAndSlashResources();
         _turnWatchdogCts?.Cancel();
         _turnWatchdogCts?.Dispose();
         _serverMaintenanceCts?.Cancel();

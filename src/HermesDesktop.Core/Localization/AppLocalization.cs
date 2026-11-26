@@ -76,6 +76,7 @@ public static class AppLocalization
     {
         V2Tab.Bots => T("Bots", "智能体"),
         V2Tab.Chats => T("Sessions", "会话"),
+        V2Tab.Groups => T("Groups", "群组"),
         V2Tab.Tasks => T("Tasks", "任务"),
         V2Tab.Pulse => T("Pulse", "动态"),
         V2Tab.Artifacts => T("Artifacts", "产物"),

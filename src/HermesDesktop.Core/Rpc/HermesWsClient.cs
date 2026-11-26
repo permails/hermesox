@@ -17,7 +17,7 @@ public sealed class RpcException(int? code, string message, string? reason = nul
     public string? Detail { get; } = detail;
 }
 
-public sealed class HermesWsClient : IAsyncDisposable
+public sealed partial class HermesWsClient : IAsyncDisposable
 {
     private ClientWebSocket? _socket;
     private CancellationTokenSource? _receiveCts;

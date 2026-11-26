@@ -494,6 +494,7 @@ public enum V2Tab
 {
     Bots,
     Chats,
+    Groups,
     Tasks,
     Pulse,
     Artifacts,
@@ -502,7 +503,7 @@ public enum V2Tab
 
 public sealed class V2TabLayout
 {
-    public static readonly V2Tab[] StandardOrder = [V2Tab.Bots, V2Tab.Chats, V2Tab.Tasks, V2Tab.Settings];
+    public static readonly V2Tab[] StandardOrder = [V2Tab.Bots, V2Tab.Chats, V2Tab.Groups, V2Tab.Tasks, V2Tab.Settings];
     public static readonly V2Tab[] OptionalTabs = [V2Tab.Pulse, V2Tab.Artifacts];
     public static readonly HashSet<V2Tab> AlwaysShown = [V2Tab.Chats, V2Tab.Settings];
     public const int MostShown = 5;
@@ -539,7 +540,14 @@ public sealed class V2TabLayout
 
         foreach (var tab in StandardOrder)
         {
-            if (!_order.Contains(tab)) _order.Add(tab);
+            if (!_order.Contains(tab))
+            {
+                var settingsIdx = _order.IndexOf(V2Tab.Settings);
+                if (settingsIdx >= 0 && tab != V2Tab.Settings)
+                    _order.Insert(settingsIdx, tab);
+                else
+                    _order.Add(tab);
+            }
         }
 
         foreach (var tab in OptionalTabs)
@@ -607,6 +615,7 @@ public sealed class V2TabLayout
         {
             "bots" => Set(V2Tab.Bots, out tab),
             "chats" => Set(V2Tab.Chats, out tab),
+            "groups" => Set(V2Tab.Groups, out tab),
             "tasks" => Set(V2Tab.Tasks, out tab),
             "pulse" => Set(V2Tab.Pulse, out tab),
             "artifacts" => Set(V2Tab.Artifacts, out tab),

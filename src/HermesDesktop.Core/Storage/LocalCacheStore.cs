@@ -9,7 +9,7 @@ public sealed record AppSettingsData
 {
     public Guid? ActiveDashboardId { get; set; }
     public string? ActiveProfile { get; set; }
-    public List<string> V2TabTokens { get; set; } = ["bots", "chats", "tasks", "-pulse", "-artifacts", "settings"];
+    public List<string> V2TabTokens { get; set; } = ["bots", "chats", "groups", "tasks", "-pulse", "-artifacts", "settings"];
     public bool ShowBesideChatDefault { get; set; } = true;
     public string LanguagePreference { get; set; } = "system";
     public string ThemePreference { get; set; } = "system";
