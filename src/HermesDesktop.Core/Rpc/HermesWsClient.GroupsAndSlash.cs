@@ -33,6 +33,97 @@ public sealed partial class HermesWsClient
         return (pct, used, max);
     }
 
+    public async Task<IReadOnlyList<ModelProviderOption>> GetModelProvidersAsync(
+        string? sessionId = null,
+        bool refresh = false,
+        CancellationToken ct = default)
+    {
+        var p = new Dictionary<string, object?> { ["explicit_only"] = true };
+        if (!string.IsNullOrWhiteSpace(sessionId)) p["session_id"] = sessionId;
+        if (refresh) p["refresh"] = true;
+
+        JsonElement res;
+        try
+        {
+            res = await RpcAsync("model.options", p, timeout: TimeSpan.FromSeconds(refresh ? 30 : 12), ct: ct);
+        }
+        catch (RpcException) when (refresh)
+        {
+            p.Remove("refresh");
+            res = await RpcAsync("model.options", p, timeout: TimeSpan.FromSeconds(12), ct: ct);
+        }
+
+        var providers = new List<ModelProviderOption>();
+        if (res.ValueKind == JsonValueKind.Object
+            && res.TryGetProperty("providers", out var arr)
+            && arr.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in arr.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object) continue;
+                var slug = GetString(item, "slug") ?? GetString(item, "id") ?? GetString(item, "name");
+                if (string.IsNullOrWhiteSpace(slug)) continue;
+
+                var displayName = GetString(item, "name") ?? slug;
+                var isCurrent = GetBool(item, "is_current") == true;
+                var aliases = new List<string>();
+                if (item.TryGetProperty("aliases", out var aliasesEl) && aliasesEl.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var a in aliasesEl.EnumerateArray())
+                    {
+                        if (a.ValueKind == JsonValueKind.String && a.GetString() is { Length: > 0 } al) aliases.Add(al);
+                    }
+                }
+
+                var models = new List<string>();
+                if (item.TryGetProperty("models", out var modelsEl) && modelsEl.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var m in modelsEl.EnumerateArray())
+                    {
+                        if (m.ValueKind == JsonValueKind.String && m.GetString() is { Length: > 0 } mid)
+                        {
+                            models.Add(mid);
+                        }
+                        else if (m.ValueKind == JsonValueKind.Object)
+                        {
+                            var midObj = GetString(m, "id") ?? GetString(m, "name");
+                            if (!string.IsNullOrWhiteSpace(midObj)) models.Add(midObj);
+                        }
+                    }
+                }
+
+                providers.Add(new ModelProviderOption(slug, displayName, aliases, isCurrent, models));
+            }
+        }
+        return providers;
+    }
+
+    public async Task ConfigureBotModelAsync(
+        string name,
+        string provider,
+        string model,
+        bool confirmExpensive = true,
+        CancellationToken ct = default)
+    {
+        var p = new Dictionary<string, object?>
+        {
+            ["name"] = name,
+            ["model"] = model.Trim()
+        };
+        if (!string.IsNullOrWhiteSpace(provider)) p["provider"] = provider.Trim();
+        if (confirmExpensive) p["confirm_expensive_model"] = true;
+
+        await _profileConfigLock.WaitAsync(ct);
+        try
+        {
+            await RpcAsync("profiles.configure", p, timeout: TimeSpan.FromSeconds(45), ct: ct);
+        }
+        finally
+        {
+            _profileConfigLock.Release();
+        }
+    }
+
     public async Task RenameSessionAsync(string sessionId, string title, string? profile = null, CancellationToken ct = default)
     {
         if (!SpeaksSessionAuthority)

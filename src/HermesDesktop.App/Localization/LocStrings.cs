@@ -320,6 +320,15 @@ public sealed class LocStrings : INotifyPropertyChanged
     public string StartupCardSwitchHint => L("Click to connect", "点击连接");
     public string StartupRetryBtn => L("Retry", "重试");
     public string StartupSwitchServerBtn => L("Manage Servers", "管理服务器");
+
+    // Per-Bot Provider & Model Selection
+    public string BotModelSectionHeader => L("API Provider & Model", "API 提供商与模型配置");
+    public string BotUseFirstPresetBtn => L("Use First Bot Default", "默认沿用首个智能体配置");
+    public string BotCustomModelBtn => L("New / Custom Config", "自定义 / 新建配置");
+    public string BotProviderLabel => L("Provider", "API 提供商 (Provider)");
+    public string BotModelLabel => L("Model", "模型名称 (Model)");
+    public string BotManualInputToggle => L("Manual input (custom provider / model)", "手动输入自定义 Provider / Model");
+    public string BotRefreshModelsBtn => L("Refresh Models", "刷新模型列表");
     public string SelectTextBtn => L("Select", "框选");
     public string SelectAllBtn => L("Select All", "全选");
     public string BackToChatViewBtn => L("Back to Chat View", "返回排版视图");

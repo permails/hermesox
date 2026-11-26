@@ -1666,6 +1666,76 @@
                   <CheckBox Grid.Column="2" IsChecked="{Binding SoulEditorNoSkills}" Content="{Binding Loc.NoSkills}" VerticalAlignment="Bottom" Margin="0,0,0,4"/>
                 </Grid>
 
+                <!-- Per-Bot API Provider & Model Card -->
+                <Border Padding="12" CornerRadius="6" Background="{DynamicResource WinCardSecondaryBrush}"
+                        BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="1">
+                  <StackPanel Spacing="10">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Grid.Column="0" Text="{Binding Loc.BotModelSectionHeader}" FontSize="12.5" FontWeight="SemiBold"
+                                 Foreground="{DynamicResource WinAccentTextBrush}" VerticalAlignment="Center"/>
+                      <Button Grid.Column="1" Classes="ghost" Content="{Binding Loc.BotRefreshModelsBtn}" FontSize="11" Padding="6,2"
+                              IsEnabled="{Binding !IsLoadingBotModels}" Command="{Binding RefreshBotModelProvidersCommand}"/>
+                    </Grid>
+
+                    <!-- Mode Switcher: Inherit First Bot vs Custom / New -->
+                    <Grid ColumnDefinitions="*,*">
+                      <Button Grid.Column="0" Margin="0,0,4,0" Padding="8,5" CornerRadius="4" BorderThickness="1"
+                              HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                              Content="{Binding Loc.BotUseFirstPresetBtn}" FontSize="11.5"
+                              Background="{Binding !SoulUseCustomProviderModel, Converter={x:Static conv:BoolToAccentBrushConverter.Instance}}"
+                              BorderBrush="{Binding !SoulUseCustomProviderModel, Converter={x:Static conv:BoolToBorderBrushConverter.Instance}}"
+                              Command="{Binding SelectDefaultFirstBotModelModeCommand}"/>
+                      <Button Grid.Column="1" Margin="4,0,0,0" Padding="8,5" CornerRadius="4" BorderThickness="1"
+                              HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                              Content="{Binding Loc.BotCustomModelBtn}" FontSize="11.5"
+                              Background="{Binding SoulUseCustomProviderModel, Converter={x:Static conv:BoolToAccentBrushConverter.Instance}}"
+                              BorderBrush="{Binding SoulUseCustomProviderModel, Converter={x:Static conv:BoolToBorderBrushConverter.Instance}}"
+                              Command="{Binding SelectCustomBotModelModeCommand}"/>
+                    </Grid>
+
+                    <!-- Quick Preset Summary when using First Bot Config -->
+                    <Border IsVisible="{Binding !SoulUseCustomProviderModel}" Padding="10,7" CornerRadius="4"
+                            Background="{DynamicResource WinCardFillBrush}" BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="1">
+                      <TextBlock Text="{Binding SoulFirstBotPresetSummary}" FontSize="12" FontFamily="{StaticResource WinMonoFontFamily}"
+                                 Foreground="{DynamicResource WinTextPrimaryBrush}" TextTrimming="CharacterEllipsis"/>
+                    </Border>
+
+                    <!-- Custom / New Provider & Model Config -->
+                    <StackPanel IsVisible="{Binding SoulUseCustomProviderModel}" Spacing="8">
+                      <CheckBox IsChecked="{Binding SoulManualProviderInput}" Content="{Binding Loc.BotManualInputToggle}"
+                                IsVisible="{Binding HasAnyAvailableModelProviders}" FontSize="11.5"/>
+
+                      <Grid IsVisible="{Binding ShowBotDropdownModelPickers}" ColumnDefinitions="*,*">
+                        <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,8,0">
+                          <TextBlock Text="{Binding Loc.BotProviderLabel}" FontSize="11.5" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                          <ComboBox ItemsSource="{Binding AvailableModelProviders}" SelectedItem="{Binding SelectedModelProviderOption}" HorizontalAlignment="Stretch">
+                            <ComboBox.ItemTemplate>
+                              <DataTemplate x:DataType="models:ModelProviderOption">
+                                <TextBlock Text="{Binding DisplayName}"/>
+                              </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                          </ComboBox>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="4" Margin="8,0,0,0">
+                          <TextBlock Text="{Binding Loc.BotModelLabel}" FontSize="11.5" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                          <ComboBox ItemsSource="{Binding AvailableModelsForSelectedProvider}" SelectedItem="{Binding SoulEditorModelInput}" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                      </Grid>
+
+                      <Grid IsVisible="{Binding ShowBotManualModelInputs}" ColumnDefinitions="*,*">
+                        <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,8,0">
+                          <TextBlock Text="{Binding Loc.BotProviderLabel}" FontSize="11.5" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                          <TextBox Text="{Binding SoulEditorProviderInput}" Watermark="e.g. anthropic / openai / openrouter"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="4" Margin="8,0,0,0">
+                          <TextBlock Text="{Binding Loc.BotModelLabel}" FontSize="11.5" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                          <TextBox Text="{Binding SoulEditorModelInput}" Watermark="e.g. claude-sonnet-4-5"/>
+                        </StackPanel>
+                      </Grid>
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
+
                 <StackPanel Spacing="6">
                   <Grid ColumnDefinitions="*,Auto">
                     <TextBlock Grid.Column="0" Text="SOUL.md" FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource WinAccentTextBrush}"/>

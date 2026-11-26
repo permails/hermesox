@@ -2664,12 +2664,20 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         _soulOriginalTitle = chip.DisplayName;
         _soulOriginalDescription = SoulEditorDescription;
         _soulOriginalText = "";
+        _soulOriginalProvider = chip.Profile.Provider?.Trim() ?? "";
+        _soulOriginalModel = chip.Model?.Trim() ?? "";
+        SoulEditorProviderInput = _soulOriginalProvider;
+        SoulEditorModelInput = _soulOriginalModel;
+        SoulManualProviderInput = false;
+        InitializeFirstBotProviderPreset();
+        SoulUseCustomProviderModel = true;
         IsSoulEditorOpen = true;
 
         if (_wsClient is not { IsConnected: true })
         {
             await EnsureWsConnectedAsync();
         }
+        _ = LoadBotModelProvidersAsync(refresh: false);
         await ReloadSoulFromServerAsync();
     }
 
@@ -2694,12 +2702,21 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         SoulEditorCloneFrom = SoulCloneOptions.Contains("default") ? "default" : "(Fresh profile)";
         SoulEditorNoSkills = false;
         SoulEditorShareAuth = true;
+        InitializeFirstBotProviderPreset();
+        SoulUseCustomProviderModel = false;
+        SoulManualProviderInput = false;
+        SoulEditorProviderInput = _firstBotProvider;
+        SoulEditorModelInput = _firstBotModel;
         IsSoulEditorOpen = true;
 
         if (_wsClient is not { IsConnected: true })
         {
             SoulEditorNotice = AppLocalization.T("Reconnecting to Hermes gateway...", "正在重新连接 Hermes 网关...");
             _ = ReconnectForSoulModalAsync();
+        }
+        else
+        {
+            _ = LoadBotModelProvidersAsync(refresh: false);
         }
     }
 
@@ -2709,6 +2726,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         if (IsSoulEditorOpen && IsCreatingSoul)
         {
             SoulEditorNotice = ok ? null : AppLocalization.T("Gateway offline — will retry when creating.", "网关未连接，点击创建时将自动重连。");
+            if (ok) _ = LoadBotModelProvidersAsync(refresh: false);
         }
     }
 
@@ -2743,6 +2761,11 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                     SoulEditorText = details.Soul;
                     _soulOriginalDescription = details.Description;
                     _soulOriginalText = details.Soul;
+                    _soulOriginalProvider = details.Provider;
+                    _soulOriginalModel = details.Model;
+                    SoulEditorProviderInput = details.Provider;
+                    SoulEditorModelInput = details.Model;
+                    SyncProviderSelectionFromStrings(details.Provider, details.Model);
                     skills = details.Skills;
                     toolsets = details.Toolsets;
                     mcpServers = details.McpServers;
@@ -2888,13 +2911,30 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                     ? null
                     : SoulEditorCloneFrom;
 
+                var resolvedProvider = (SoulUseCustomProviderModel ? SoulEditorProviderInput : _firstBotProvider).Trim();
+                var resolvedModel = (SoulUseCustomProviderModel ? SoulEditorModelInput : _firstBotModel).Trim();
+
                 await _wsClient.CreateBotProfileAsync(
                     slug: slug,
                     description: SoulEditorDescription.Trim(),
                     soul: composedSoul,
                     cloneFrom: cloneFrom,
                     noSkills: SoulEditorNoSkills,
-                    shareAuth: SoulEditorShareAuth);
+                    shareAuth: SoulEditorShareAuth,
+                    provider: string.IsNullOrWhiteSpace(resolvedProvider) ? null : resolvedProvider,
+                    model: string.IsNullOrWhiteSpace(resolvedModel) ? null : resolvedModel);
+
+                if (!string.IsNullOrWhiteSpace(resolvedModel))
+                {
+                    try
+                    {
+                        await _wsClient.ConfigureBotModelAsync(slug, resolvedProvider, resolvedModel);
+                    }
+                    catch (Exception mex)
+                    {
+                        AppDiagnostics.Log("BOT_MODEL_WARN", $"Post-create model pin warning for {slug}: {mex.Message}");
+                    }
+                }
 
                 var titleTrimmed = SoulEditorTitleInput.Trim();
                 if (!string.IsNullOrEmpty(titleTrimmed) && !string.Equals(titleTrimmed, slug, StringComparison.Ordinal))
@@ -2924,6 +2964,10 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 var descChanged = !string.Equals(SoulEditorDescription, _soulOriginalDescription, StringComparison.Ordinal);
                 var soulChanged = !string.Equals(SoulEditorText, _soulOriginalText, StringComparison.Ordinal);
                 var titleChanged = !string.Equals(SoulEditorTitleInput.Trim(), _soulOriginalTitle, StringComparison.Ordinal);
+                var nextProvider = (SoulUseCustomProviderModel ? SoulEditorProviderInput : _firstBotProvider).Trim();
+                var nextModel = (SoulUseCustomProviderModel ? SoulEditorModelInput : _firstBotModel).Trim();
+                var modelChanged = !string.Equals(nextProvider, _soulOriginalProvider, StringComparison.Ordinal)
+                    || !string.Equals(nextModel, _soulOriginalModel, StringComparison.Ordinal);
 
                 var currentDisabledSkills = EditingSkills.Where(x => !x.IsEnabled).Select(x => x.Name).ToHashSet(StringComparer.Ordinal);
                 var currentEnabledToolsets = EditingToolsets.Where(x => x.IsEnabled).Select(x => x.Name).ToHashSet(StringComparer.Ordinal);
@@ -2933,10 +2977,17 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 var toolsetsChanged = EditingToolsets.Count > 0 && !currentEnabledToolsets.SetEquals(_baselineEnabledToolsets);
                 var mcpChanged = EditingMcpServers.Count > 0 && !currentEnabledMcp.SetEquals(_baselineEnabledMcpServers);
 
-                if (!descChanged && !soulChanged && !titleChanged && !skillsChanged && !toolsetsChanged && !mcpChanged)
+                if (!descChanged && !soulChanged && !titleChanged && !modelChanged && !skillsChanged && !toolsetsChanged && !mcpChanged)
                 {
                     SoulEditorNotice = AppLocalization.T("No changes to save.", "没有任何改动需要保存。");
                     return;
+                }
+
+                if (modelChanged && !string.IsNullOrWhiteSpace(nextModel))
+                {
+                    await _wsClient.ConfigureBotModelAsync(slug, nextProvider, nextModel);
+                    _soulOriginalProvider = nextProvider;
+                    _soulOriginalModel = nextModel;
                 }
 
                 if (!_loadedCapabilitiesFromRestOnly)

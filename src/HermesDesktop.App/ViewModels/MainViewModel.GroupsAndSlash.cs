@@ -1503,6 +1503,10 @@ public sealed partial class MainViewModel
         IsTranscriptSelectionMode = false;
         TranscriptSelectionText = "";
         PendingRenameSession = null;
+        AvailableModelProviders.Clear();
+        AvailableModelsForSelectedProvider.Clear();
+        _firstBotProvider = "";
+        _firstBotModel = "";
         _slashCatalog = [.. SlashCommandParser.BuiltInCommands];
         SlashSuggestions.Clear();
         OnPropertyChanged(nameof(IsSlashSuggestionsVisible));
@@ -1513,5 +1517,208 @@ public sealed partial class MainViewModel
     private void DisposeGroupsAndSlashResources()
     {
         _groupPollTimer?.Stop();
+    }
+
+    // ---- 8. Per-Bot API Provider & Model Configuration (Default First Bot Preset + Custom/New) ----
+
+    public ObservableCollection<ModelProviderOption> AvailableModelProviders { get; } = [];
+    public ObservableCollection<string> AvailableModelsForSelectedProvider { get; } = [];
+
+    [ObservableProperty] private ModelProviderOption? _selectedModelProviderOption;
+    [ObservableProperty] private bool _soulUseCustomProviderModel;
+    [ObservableProperty] private bool _soulManualProviderInput;
+    [ObservableProperty] private string _soulEditorProviderInput = "";
+    [ObservableProperty] private string _soulEditorModelInput = "";
+    [ObservableProperty] private string _soulFirstBotPresetSummary = "";
+    [ObservableProperty] private bool _isLoadingBotModels;
+
+    private string _soulOriginalProvider = "";
+    private string _soulOriginalModel = "";
+    private string _firstBotProvider = "";
+    private string _firstBotModel = "";
+
+    public bool HasAnyAvailableModelProviders => AvailableModelProviders.Count > 0;
+    public bool ShowBotDropdownModelPickers => SoulUseCustomProviderModel && !SoulManualProviderInput && AvailableModelProviders.Count > 0;
+    public bool ShowBotManualModelInputs => SoulUseCustomProviderModel && (SoulManualProviderInput || AvailableModelProviders.Count == 0);
+
+    partial void OnSoulUseCustomProviderModelChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ShowBotDropdownModelPickers));
+        OnPropertyChanged(nameof(ShowBotManualModelInputs));
+    }
+
+    partial void OnSoulManualProviderInputChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ShowBotDropdownModelPickers));
+        OnPropertyChanged(nameof(ShowBotManualModelInputs));
+    }
+
+    partial void OnSelectedModelProviderOptionChanged(ModelProviderOption? value)
+    {
+        if (value is null) return;
+        if (!SoulManualProviderInput)
+        {
+            SoulEditorProviderInput = value.Slug;
+        }
+        AvailableModelsForSelectedProvider.Clear();
+        foreach (var m in value.Models)
+        {
+            AvailableModelsForSelectedProvider.Add(m);
+        }
+        if (!string.IsNullOrWhiteSpace(SoulEditorModelInput)
+            && !AvailableModelsForSelectedProvider.Contains(SoulEditorModelInput, StringComparer.OrdinalIgnoreCase)
+            && AvailableModelsForSelectedProvider.Count > 0)
+        {
+            AvailableModelsForSelectedProvider.Insert(0, SoulEditorModelInput);
+        }
+        if (string.IsNullOrWhiteSpace(SoulEditorModelInput) && AvailableModelsForSelectedProvider.Count > 0)
+        {
+            SoulEditorModelInput = AvailableModelsForSelectedProvider[0];
+        }
+    }
+
+    [RelayCommand]
+    private void SelectDefaultFirstBotModelMode()
+    {
+        SoulUseCustomProviderModel = false;
+        SoulEditorProviderInput = _firstBotProvider;
+        SoulEditorModelInput = _firstBotModel;
+        SyncProviderSelectionFromStrings(_firstBotProvider, _firstBotModel);
+    }
+
+    [RelayCommand]
+    private void SelectCustomBotModelMode()
+    {
+        SoulUseCustomProviderModel = true;
+        if (string.IsNullOrWhiteSpace(SoulEditorModelInput) && !string.IsNullOrWhiteSpace(_firstBotModel))
+        {
+            SoulEditorProviderInput = _firstBotProvider;
+            SoulEditorModelInput = _firstBotModel;
+        }
+        SyncProviderSelectionFromStrings(SoulEditorProviderInput, SoulEditorModelInput);
+    }
+
+    [RelayCommand]
+    private async Task RefreshBotModelProvidersAsync()
+    {
+        await LoadBotModelProvidersAsync(refresh: true);
+    }
+
+    private void InitializeFirstBotProviderPreset()
+    {
+        var firstCreated = ProfileChips.FirstOrDefault(p =>
+            !p.Profile.IsDefault
+            && (!string.IsNullOrWhiteSpace(p.Model) || !string.IsNullOrWhiteSpace(p.Profile.Provider)))
+            ?? ProfileChips.FirstOrDefault(p => !p.Profile.IsDefault)
+            ?? ProfileChips.FirstOrDefault();
+
+        _firstBotProvider = firstCreated?.Profile.Provider?.Trim() ?? "";
+        _firstBotModel = firstCreated?.Model?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(_firstBotModel)
+            && !string.IsNullOrWhiteSpace(CurrentModelLabel)
+            && !string.Equals(CurrentModelLabel, "default", StringComparison.OrdinalIgnoreCase))
+        {
+            _firstBotModel = CurrentModelLabel;
+        }
+
+        UpdateFirstBotPresetSummary(firstCreated?.DisplayName);
+        if (firstCreated is not null && string.IsNullOrWhiteSpace(_firstBotProvider))
+        {
+            _ = PopulateFirstBotDetailsFromServerAsync(firstCreated.Name, firstCreated.DisplayName);
+        }
+    }
+
+    private void UpdateFirstBotPresetSummary(string? sourceName)
+    {
+        var prefix = string.IsNullOrWhiteSpace(sourceName) ? "" : $"{sourceName} · ";
+        if (!string.IsNullOrWhiteSpace(_firstBotProvider) && !string.IsNullOrWhiteSpace(_firstBotModel))
+        {
+            SoulFirstBotPresetSummary = $"{prefix}{_firstBotProvider} / {_firstBotModel}";
+        }
+        else if (!string.IsNullOrWhiteSpace(_firstBotModel))
+        {
+            SoulFirstBotPresetSummary = $"{prefix}{_firstBotModel}";
+        }
+        else
+        {
+            SoulFirstBotPresetSummary = AppLocalization.T("Gateway default provider & model", "服务端默认提供商与模型");
+        }
+    }
+
+    private async Task PopulateFirstBotDetailsFromServerAsync(string profileName, string? displayName)
+    {
+        if (_wsClient is not { IsConnected: true }) return;
+        try
+        {
+            var details = await _wsClient.DescribeBotProfileAsync(profileName);
+            if (!string.IsNullOrWhiteSpace(details.Provider)) _firstBotProvider = details.Provider.Trim();
+            if (!string.IsNullOrWhiteSpace(details.Model)) _firstBotModel = details.Model.Trim();
+            UpdateFirstBotPresetSummary(displayName);
+            if (IsCreatingSoul && !SoulUseCustomProviderModel)
+            {
+                SoulEditorProviderInput = _firstBotProvider;
+                SoulEditorModelInput = _firstBotModel;
+                SyncProviderSelectionFromStrings(_firstBotProvider, _firstBotModel);
+            }
+        }
+        catch
+        {
+            // Keep roster summary on failure
+        }
+    }
+
+    private async Task LoadBotModelProvidersAsync(bool refresh)
+    {
+        if (_wsClient is not { IsConnected: true } || IsLoadingBotModels) return;
+        IsLoadingBotModels = true;
+        try
+        {
+            var sessionId = _activeRuntimeSessionId ?? ActiveSession?.StoredSessionId ?? ActiveSession?.Id;
+            var items = await _wsClient.GetModelProvidersAsync(sessionId, refresh);
+            AvailableModelProviders.Clear();
+            foreach (var p in items)
+            {
+                AvailableModelProviders.Add(p);
+            }
+            OnPropertyChanged(nameof(HasAnyAvailableModelProviders));
+            OnPropertyChanged(nameof(ShowBotDropdownModelPickers));
+            OnPropertyChanged(nameof(ShowBotManualModelInputs));
+
+            SyncProviderSelectionFromStrings(SoulEditorProviderInput, SoulEditorModelInput);
+        }
+        catch (Exception ex)
+        {
+            HermesDesktop.Core.Diagnostics.AppDiagnostics.Log("MODELS_WARN", $"LoadBotModelProvidersAsync failed: {ex.Message}");
+        }
+        finally
+        {
+            IsLoadingBotModels = false;
+        }
+    }
+
+    private void SyncProviderSelectionFromStrings(string provider, string model)
+    {
+        if (AvailableModelProviders.Count == 0) return;
+
+        ModelProviderOption? match = null;
+        if (!string.IsNullOrWhiteSpace(provider))
+        {
+            var norm = provider.Trim();
+            match = AvailableModelProviders.FirstOrDefault(p =>
+                string.Equals(p.Slug, norm, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(p.DisplayName, norm, StringComparison.OrdinalIgnoreCase)
+                || p.Aliases.Any(a => string.Equals(a, norm, StringComparison.OrdinalIgnoreCase)));
+        }
+        match ??= AvailableModelProviders.FirstOrDefault(p => p.IsCurrent) ?? AvailableModelProviders[0];
+
+        SelectedModelProviderOption = match;
+        if (!string.IsNullOrWhiteSpace(model))
+        {
+            if (!AvailableModelsForSelectedProvider.Contains(model, StringComparer.OrdinalIgnoreCase))
+            {
+                AvailableModelsForSelectedProvider.Insert(0, model);
+            }
+            SoulEditorModelInput = model;
+        }
     }
 }

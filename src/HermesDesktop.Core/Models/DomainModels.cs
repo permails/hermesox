@@ -645,6 +645,13 @@ public sealed record BotProfileDetails(
     IReadOnlyList<BotProfileCapability> Toolsets,
     IReadOnlyList<BotProfileCapability> McpServers);
 
+public sealed record ModelProviderOption(
+    string Slug,
+    string DisplayName,
+    IReadOnlyList<string> Aliases,
+    bool IsCurrent,
+    IReadOnlyList<string> Models);
+
 public sealed record BotRosterSnapshot(
     IReadOnlyList<BotProfile> Profiles,
     bool SupportsBotProtocol);
