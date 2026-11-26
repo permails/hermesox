@@ -69,6 +69,20 @@ public sealed class PendingAttachmentItem
     }
 }
 
+public sealed class BufferedOutboundMessageItem
+{
+    public string Id { get; } = Guid.NewGuid().ToString("N");
+    public required string Text { get; init; }
+    public required IReadOnlyList<PendingAttachmentItem> Attachments { get; init; }
+    public string PreviewText => string.IsNullOrWhiteSpace(Text)
+        ? AppLocalization.T("[Attachments only]", "[仅附件]")
+        : Text.Trim().Replace("\r\n", " ").Replace('\n', ' ');
+    public bool HasAttachments => Attachments.Count > 0;
+    public string AttachmentSummary => HasAttachments
+        ? AppLocalization.T($"📎 {Attachments.Count} attachment(s)", $"📎 {Attachments.Count} 个附件")
+        : "";
+}
+
 public sealed partial class ProfileOptionViewModel(BotProfile profile, bool isSelected) : ObservableObject
 {
     public BotProfile Profile { get; } = profile;
@@ -143,8 +157,11 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly DispatcherTimer _backgroundNoticeTimer;
     private readonly Dictionary<string, MessageItemViewModel> _activeTools = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<PendingAttachmentItem>> _draftAttachmentsBySession = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<BufferedOutboundMessageItem>> _bufferedMessagesBySession = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _composerErrorsBySession = new(StringComparer.Ordinal);
     private readonly HashSet<string> _uploadingSessionKeys = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _compressingSessionKeys = new(StringComparer.Ordinal);
+    private bool _isFlushingBufferedMessages;
     private string? _activeRuntimeSessionId;
     private string? _streamBufferSessionId;
     private SessionSummary? _openedSession;
@@ -248,6 +265,35 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     }
     public ObservableCollection<PendingAttachmentItem> PendingAttachments { get; } = [];
     public bool HasPendingAttachments => PendingAttachments.Count > 0;
+    public ObservableCollection<BufferedOutboundMessageItem> BufferedMessages { get; } = [];
+    public bool HasBufferedMessages => BufferedMessages.Count > 0;
+    [ObservableProperty] private bool _isCompressingActiveSession;
+    public bool IsSessionBusyForSend => IsRunningTurn || IsCompressingActiveSession;
+    public bool HasComposerPayload => !string.IsNullOrWhiteSpace(ComposerText) || PendingAttachments.Count > 0;
+    public string PrimarySendButtonLabel
+    {
+        get
+        {
+            if (!IsSessionBusyForSend) return Loc.Send;
+            return !HasComposerPayload && HasBufferedMessages ? Loc.ForceSend : Loc.BufferSend;
+        }
+    }
+    public string PrimarySendButtonTip
+    {
+        get
+        {
+            if (!IsSessionBusyForSend) return AppLocalization.T("Send message", "发送消息");
+            if (!HasComposerPayload && HasBufferedMessages)
+            {
+                return AppLocalization.T(
+                    "Click Send again to force-send the buffered message immediately.",
+                    "再次点击发送，立即强行把缓存消息发往服务端。");
+            }
+            return AppLocalization.T(
+                "Current task or compression is running; message will buffer locally and send automatically when finished.",
+                "当前有任务或压缩正在运行，发送会先缓存在本地，完成后自动发出。");
+        }
+    }
     [ObservableProperty] private string _currentModelLabel = "default";
     [ObservableProperty] private double _contextPercent;
     [ObservableProperty] private int _contextUsed;
@@ -484,7 +530,19 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             OnPropertyChanged(nameof(HasNoSavedDashboards));
             RebuildStartupDashboardOptions();
         };
-        PendingAttachments.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasPendingAttachments));
+        PendingAttachments.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(HasPendingAttachments));
+            OnPropertyChanged(nameof(HasComposerPayload));
+            OnPropertyChanged(nameof(PrimarySendButtonLabel));
+            OnPropertyChanged(nameof(PrimarySendButtonTip));
+        };
+        BufferedMessages.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(HasBufferedMessages));
+            OnPropertyChanged(nameof(PrimarySendButtonLabel));
+            OnPropertyChanged(nameof(PrimarySendButtonTip));
+        };
 
         var startupDashboard = SessionCatalogHelper.ResolveStartupDashboard(SavedDashboards, _settings.ActiveDashboardId);
         if (startupDashboard is not null)
@@ -635,6 +693,9 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         {
             _cache.SaveDraft(DraftKey(ActiveSession.Id), value);
         }
+        OnPropertyChanged(nameof(HasComposerPayload));
+        OnPropertyChanged(nameof(PrimarySendButtonLabel));
+        OnPropertyChanged(nameof(PrimarySendButtonTip));
         UpdateSlashSuggestions(value);
     }
 
@@ -1741,8 +1802,10 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         _allSessions.RemoveAll(s => SessionsMatch(s, target, deletedRuntime));
         var deletedKey = SessionAttachmentKey(target);
         _draftAttachmentsBySession.Remove(deletedKey);
+        _bufferedMessagesBySession.Remove(deletedKey);
         _composerErrorsBySession.Remove(deletedKey);
         _uploadingSessionKeys.Remove(deletedKey);
+        _compressingSessionKeys.Remove(deletedKey);
         _cache.SaveDraft(DraftKey(target.Id), "");
         if (!string.IsNullOrEmpty(target.StoredSessionId))
         {
@@ -1776,8 +1839,10 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         if (deletedActive)
         {
             PendingAttachments.Clear();
+            BufferedMessages.Clear();
             ComposerError = null;
             IsUploadingAttachments = false;
+            IsCompressingActiveSession = false;
             Interlocked.Increment(ref _openSessionGeneration);
             ClearActiveTranscriptState();
             _openedSession = null;
@@ -2101,7 +2166,9 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     {
         if (IsUploadingAttachments) return;
         var hasAttachments = !isExpandedSlashPrompt && PendingAttachments.Count > 0;
-        if (string.IsNullOrEmpty(text) && !hasAttachments) return;
+        var hasPayload = !string.IsNullOrEmpty(text) || hasAttachments;
+        var hasBuffered = !isExpandedSlashPrompt && ActiveSession is not null && BufferedMessages.Count > 0;
+        if (!hasPayload && !hasBuffered) return;
         ComposerError = null;
 
         if (_wsClient is null)
@@ -2120,7 +2187,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
         if (ActiveSession is null)
         {
-            if (!isExpandedSlashPrompt && !hasAttachments && await TryHandleSlashCommandAsync(text))
+            if (!isExpandedSlashPrompt && !hasAttachments && !string.IsNullOrEmpty(text) && await TryHandleSlashCommandAsync(text))
             {
                 return;
             }
@@ -2136,13 +2203,54 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 return;
             }
         }
-        else if (!isExpandedSlashPrompt && !hasAttachments && await TryHandleSlashCommandAsync(text))
+        else if (!isExpandedSlashPrompt && !hasAttachments && !string.IsNullOrEmpty(text) && await TryHandleSlashCommandAsync(text))
         {
             return;
         }
 
         var sourceSession = ActiveSession;
         var sourceKey = SessionAttachmentKey(sourceSession);
+        var sendAction = isExpandedSlashPrompt
+            ? OutboundSendAction.SendCurrentInputImmediately
+            : OutboundMessageBufferHelper.ResolveSendAction(IsSessionBusyForSend, hasPayload, BufferedMessages.Count > 0);
+
+        if (sendAction == OutboundSendAction.Ignore)
+        {
+            return;
+        }
+
+        if (sendAction == OutboundSendAction.BufferCurrentInput)
+        {
+            var bufferedAttachments = PendingAttachments.ToList();
+            PendingAttachments.Clear();
+            _draftAttachmentsBySession.Remove(sourceKey);
+            _composerErrorsBySession.Remove(sourceKey);
+            ComposerText = "";
+            _cache.SaveDraft(DraftKey(sourceSession.Id), "");
+
+            EnqueueBufferedMessage(sourceKey, new BufferedOutboundMessageItem
+            {
+                Text = text,
+                Attachments = bufferedAttachments
+            });
+            StatusBanner = AppLocalization.T(
+                "Buffered locally — will send automatically once the current task finishes (click Send again to force send now).",
+                "消息已缓存在本地待发区，将在当前任务/压缩完成后自动发出（再次点击「强行发送」可立即强行发出）。");
+            return;
+        }
+
+        if (sendAction is OutboundSendAction.ForceSendNextBuffered or OutboundSendAction.SendNextBufferedImmediately)
+        {
+            var nextBuffered = DequeueFirstBufferedMessage(sourceKey);
+            if (nextBuffered is null) return;
+            await SubmitChatMessageCoreAsync(
+                sourceSession,
+                nextBuffered.Text,
+                nextBuffered.Attachments,
+                isExpandedSlashPrompt: false);
+            return;
+        }
+
         var stagedToSend = isExpandedSlashPrompt ? [] : PendingAttachments.ToList();
         if (!isExpandedSlashPrompt)
         {
@@ -2152,6 +2260,119 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             ComposerText = "";
             _cache.SaveDraft(DraftKey(sourceSession.Id), "");
         }
+
+        await SubmitChatMessageCoreAsync(sourceSession, text, stagedToSend, isExpandedSlashPrompt);
+    }
+
+    [RelayCommand]
+    private async Task ForceSendBufferedMessageAsync(BufferedOutboundMessageItem? item)
+    {
+        var sourceSession = ActiveSession;
+        if (item is null || sourceSession is null || IsUploadingAttachments) return;
+        var sourceKey = SessionAttachmentKey(sourceSession);
+        RemoveBufferedMessage(sourceKey, item);
+        await SubmitChatMessageCoreAsync(sourceSession, item.Text, item.Attachments, isExpandedSlashPrompt: false);
+    }
+
+    [RelayCommand]
+    private void EditBufferedMessage(BufferedOutboundMessageItem? item)
+    {
+        var sourceSession = ActiveSession;
+        if (item is null || sourceSession is null) return;
+        var sourceKey = SessionAttachmentKey(sourceSession);
+        RemoveBufferedMessage(sourceKey, item);
+
+        if (!string.IsNullOrEmpty(item.Text))
+        {
+            ComposerText = string.IsNullOrWhiteSpace(ComposerText)
+                ? item.Text
+                : $"{ComposerText.TrimEnd()}\n{item.Text}";
+        }
+        foreach (var att in item.Attachments)
+        {
+            if (!PendingAttachments.Contains(att))
+            {
+                PendingAttachments.Add(att);
+            }
+        }
+    }
+
+    [RelayCommand]
+    private void DiscardBufferedMessage(BufferedOutboundMessageItem? item)
+    {
+        var sourceSession = ActiveSession;
+        if (item is null || sourceSession is null) return;
+        RemoveBufferedMessage(SessionAttachmentKey(sourceSession), item);
+    }
+
+    private void EnqueueBufferedMessage(string sessionKey, BufferedOutboundMessageItem item)
+    {
+        BufferedMessages.Add(item);
+        SyncBufferedMessagesCache(sessionKey);
+    }
+
+    private BufferedOutboundMessageItem? DequeueFirstBufferedMessage(string sessionKey)
+    {
+        if (BufferedMessages.Count == 0) return null;
+        var first = BufferedMessages[0];
+        BufferedMessages.RemoveAt(0);
+        SyncBufferedMessagesCache(sessionKey);
+        return first;
+    }
+
+    private void RemoveBufferedMessage(string sessionKey, BufferedOutboundMessageItem item)
+    {
+        BufferedMessages.Remove(item);
+        SyncBufferedMessagesCache(sessionKey);
+    }
+
+    private void SyncBufferedMessagesCache(string sessionKey)
+    {
+        if (BufferedMessages.Count > 0)
+        {
+            _bufferedMessagesBySession[sessionKey] = BufferedMessages.ToList();
+        }
+        else
+        {
+            _bufferedMessagesBySession.Remove(sessionKey);
+        }
+    }
+
+    private async Task TryFlushBufferedMessagesAsync()
+    {
+        if (_isFlushingBufferedMessages
+            || IsRunningTurn
+            || IsCompressingActiveSession
+            || IsUploadingAttachments
+            || _wsClient is not { IsConnected: true }
+            || ActiveSession is not { } session
+            || BufferedMessages.Count == 0)
+        {
+            return;
+        }
+
+        _isFlushingBufferedMessages = true;
+        try
+        {
+            var key = SessionAttachmentKey(session);
+            var next = DequeueFirstBufferedMessage(key);
+            if (next is null) return;
+            await SubmitChatMessageCoreAsync(session, next.Text, next.Attachments, isExpandedSlashPrompt: false);
+        }
+        finally
+        {
+            _isFlushingBufferedMessages = false;
+        }
+    }
+
+    private async Task SubmitChatMessageCoreAsync(
+        SessionSummary sourceSession,
+        string text,
+        IReadOnlyList<PendingAttachmentItem> stagedToSend,
+        bool isExpandedSlashPrompt)
+    {
+        if (_wsClient is null) return;
+        var sourceKey = SessionAttachmentKey(sourceSession);
 
         var profile = sourceSession.Profile ?? SelectedProfile?.Name;
         var targetId = _activeRuntimeSessionId ?? sourceSession.RuntimeSessionId ?? sourceSession.Id;
@@ -2480,9 +2701,19 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             {
                 _composerErrorsBySession.Remove(outgoingKey);
             }
+
+            if (BufferedMessages.Count > 0)
+            {
+                _bufferedMessagesBySession[outgoingKey] = BufferedMessages.ToList();
+            }
+            else
+            {
+                _bufferedMessagesBySession.Remove(outgoingKey);
+            }
         }
 
         PendingAttachments.Clear();
+        BufferedMessages.Clear();
         ComposerError = null;
         if (nextTarget is not null)
         {
@@ -2494,15 +2725,24 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                     PendingAttachments.Add(item);
                 }
             }
+            if (_bufferedMessagesBySession.TryGetValue(nextKey, out var savedBuffered))
+            {
+                foreach (var item in savedBuffered)
+                {
+                    BufferedMessages.Add(item);
+                }
+            }
             if (_composerErrorsBySession.TryGetValue(nextKey, out var savedError))
             {
                 ComposerError = savedError;
             }
             IsUploadingAttachments = _uploadingSessionKeys.Contains(nextKey);
+            IsCompressingActiveSession = _compressingSessionKeys.Contains(nextKey);
         }
         else
         {
             IsUploadingAttachments = false;
+            IsCompressingActiveSession = false;
         }
     }
 
@@ -4033,13 +4273,34 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
     partial void OnIsRunningTurnChanged(bool value)
     {
+        OnPropertyChanged(nameof(IsSessionBusyForSend));
+        OnPropertyChanged(nameof(PrimarySendButtonLabel));
+        OnPropertyChanged(nameof(PrimarySendButtonTip));
         _turnWatchdogCts?.Cancel();
-        if (!value) return;
+        if (!value)
+        {
+            if (!IsCompressingActiveSession)
+            {
+                _ = TryFlushBufferedMessagesAsync();
+            }
+            return;
+        }
 
         var cts = new CancellationTokenSource();
         _turnWatchdogCts = cts;
         _lastActiveStreamEventAt = DateTimeOffset.UtcNow;
         _ = MonitorRunningTurnAsync(cts.Token);
+    }
+
+    partial void OnIsCompressingActiveSessionChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsSessionBusyForSend));
+        OnPropertyChanged(nameof(PrimarySendButtonLabel));
+        OnPropertyChanged(nameof(PrimarySendButtonTip));
+        if (!value && !IsRunningTurn)
+        {
+            _ = TryFlushBufferedMessagesAsync();
+        }
     }
 
     private async Task MonitorRunningTurnAsync(CancellationToken ct)

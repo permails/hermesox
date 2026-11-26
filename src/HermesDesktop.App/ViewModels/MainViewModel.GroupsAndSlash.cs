@@ -924,12 +924,17 @@ public sealed partial class MainViewModel
         }
     }
 
-    private bool _isCompressingActiveSession;
+    private void RefreshCompressingIndicatorForActiveSession()
+    {
+        var current = _openedSession ?? ActiveSession;
+        IsCompressingActiveSession = current is not null && _compressingSessionKeys.Contains(SessionAttachmentKey(current));
+    }
 
     private async Task ExecuteCompressCommandAsync(SessionSummary session, string? focusTopic)
     {
         if (_wsClient is null) return;
-        if (_isCompressingActiveSession)
+        var compressKey = SessionAttachmentKey(session);
+        if (_compressingSessionKeys.Contains(compressKey))
         {
             AppendSystemNotice(AppLocalization.T(
                 "Context compression is already in progress.",
@@ -937,7 +942,9 @@ public sealed partial class MainViewModel
             return;
         }
 
-        _isCompressingActiveSession = true;
+        _compressingSessionKeys.Add(compressKey);
+        RefreshCompressingIndicatorForActiveSession();
+        var keepPendingClaim = false;
         var profile = session.Profile ?? SelectedProfile?.Name;
         try
         {
@@ -970,6 +977,7 @@ public sealed partial class MainViewModel
 
             if (compressResult.IsPending)
             {
+                keepPendingClaim = true;
                 StatusBanner = AppLocalization.T("Compressing in background…", "上下文正在后台压缩…");
                 AppendSystemNotice(compressResult.SummaryText);
                 return;
@@ -1015,25 +1023,41 @@ public sealed partial class MainViewModel
         }
         finally
         {
-            _isCompressingActiveSession = false;
+            if (!keepPendingClaim)
+            {
+                _compressingSessionKeys.Remove(compressKey);
+                RefreshCompressingIndicatorForActiveSession();
+            }
         }
     }
 
-    private void HandleSessionStatusUpdate(StatusUpdateEvent status)
+    private async void HandleSessionStatusUpdate(StatusUpdateEvent status)
     {
         var kind = status.Kind.Trim().ToLowerInvariant();
+        var current = _openedSession ?? ActiveSession;
         if (kind is "compacting" or "compressing")
         {
+            if (current is not null)
+            {
+                _compressingSessionKeys.Add(SessionAttachmentKey(current));
+                RefreshCompressingIndicatorForActiveSession();
+            }
             StatusBanner = !string.IsNullOrWhiteSpace(status.Text) ? status.Text : Loc.SlashCommandCompressing;
             return;
         }
 
         if (kind is "compacted" or "compact_complete" or "compression_complete")
         {
-            StatusBanner = $"Connected · {_activeDashboard?.Label}";
             if (!IsRunningTurn)
             {
-                _ = RefreshActiveSessionMessagesAsync();
+                try
+                {
+                    await RefreshActiveSessionMessagesAsync();
+                }
+                catch
+                {
+                    // Non-fatal; still clear compressing state below
+                }
             }
             var ctxTarget = _activeRuntimeSessionId ?? ActiveSession?.RuntimeSessionId ?? ActiveSession?.Id;
             if (!string.IsNullOrWhiteSpace(ctxTarget))
@@ -1044,6 +1068,12 @@ public sealed partial class MainViewModel
             {
                 AppendSystemNotice(status.Text);
             }
+            StatusBanner = $"Connected · {_activeDashboard?.Label}";
+            if (current is not null)
+            {
+                _compressingSessionKeys.Remove(SessionAttachmentKey(current));
+            }
+            RefreshCompressingIndicatorForActiveSession();
         }
     }
 
@@ -1734,7 +1764,10 @@ public sealed partial class MainViewModel
         IsTranscriptSelectionMode = false;
         TranscriptSelectionText = "";
         PendingRenameSession = null;
-        _isCompressingActiveSession = false;
+        _compressingSessionKeys.Clear();
+        _bufferedMessagesBySession.Clear();
+        BufferedMessages.Clear();
+        IsCompressingActiveSession = false;
         AvailableModelProviders.Clear();
         AvailableModelsForSelectedProvider.Clear();
         _firstBotProvider = "";

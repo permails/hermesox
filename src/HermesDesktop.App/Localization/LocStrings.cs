@@ -89,7 +89,12 @@ public sealed class LocStrings : INotifyPropertyChanged
         "给 Hermes 发消息... (Enter 或 Ctrl+Enter 发送，Shift+Enter 换行)");
     public string Steer => L("Steer", "纠偏");
     public string Queue => L("Queue", "排队");
+    public string BufferSend => L("Queue Locally", "缓存发送");
+    public string ForceSend => L("Force Send", "强行发送");
     public string Send => L("Send", "发送");
+    public string BufferedSendBannerTitle => L("Queued Locally · Sends after current task", "待发送缓存 · 当前任务/压缩完成后自动发送");
+    public string ForceSendNowBtn => L("Send Now", "强行发送");
+    public string CompressingActiveBanner => L("Compressing context… new messages will queue locally first.", "正在压缩会话上下文… 新发消息会先缓存在本地，压缩完成后自动发出。");
     public string AttachFilesTip => L("Attach image, video, or file (drag & drop or Ctrl+V screenshot supported)", "上传图片、视频或文件（支持拖拽文件或直接 Ctrl+V 粘贴截图）");
     public string AttachmentLimitSectionTitle => L("Attachment & Video Upload Limit", "附件与视频上传大小限制");
     public string AttachmentLimitHint => L(
