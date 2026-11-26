@@ -1530,26 +1530,35 @@ public sealed partial class MainViewModel
     [ObservableProperty] private string _soulEditorProviderInput = "";
     [ObservableProperty] private string _soulEditorModelInput = "";
     [ObservableProperty] private string _soulFirstBotPresetSummary = "";
+    [ObservableProperty] private string _botProvidersStatusSummary = "";
     [ObservableProperty] private bool _isLoadingBotModels;
 
     private string _soulOriginalProvider = "";
     private string _soulOriginalModel = "";
     private string _firstBotProvider = "";
     private string _firstBotModel = "";
+    private bool _syncingProviderSelection;
 
     public bool HasAnyAvailableModelProviders => AvailableModelProviders.Count > 0;
+    public bool HasModelsForSelectedProvider => AvailableModelsForSelectedProvider.Count > 0;
     public bool ShowBotDropdownModelPickers => SoulUseCustomProviderModel && !SoulManualProviderInput && AvailableModelProviders.Count > 0;
+    public bool ShowBotDropdownModelBox => ShowBotDropdownModelPickers && HasModelsForSelectedProvider;
+    public bool ShowBotCustomModelFallbackBox => ShowBotDropdownModelPickers && !HasModelsForSelectedProvider;
     public bool ShowBotManualModelInputs => SoulUseCustomProviderModel && (SoulManualProviderInput || AvailableModelProviders.Count == 0);
 
     partial void OnSoulUseCustomProviderModelChanged(bool value)
     {
         OnPropertyChanged(nameof(ShowBotDropdownModelPickers));
+        OnPropertyChanged(nameof(ShowBotDropdownModelBox));
+        OnPropertyChanged(nameof(ShowBotCustomModelFallbackBox));
         OnPropertyChanged(nameof(ShowBotManualModelInputs));
     }
 
     partial void OnSoulManualProviderInputChanged(bool value)
     {
         OnPropertyChanged(nameof(ShowBotDropdownModelPickers));
+        OnPropertyChanged(nameof(ShowBotDropdownModelBox));
+        OnPropertyChanged(nameof(ShowBotCustomModelFallbackBox));
         OnPropertyChanged(nameof(ShowBotManualModelInputs));
     }
 
@@ -1560,21 +1569,45 @@ public sealed partial class MainViewModel
         {
             SoulEditorProviderInput = value.Slug;
         }
+
         AvailableModelsForSelectedProvider.Clear();
         foreach (var m in value.Models)
         {
             AvailableModelsForSelectedProvider.Add(m);
         }
-        if (!string.IsNullOrWhiteSpace(SoulEditorModelInput)
-            && !AvailableModelsForSelectedProvider.Contains(SoulEditorModelInput, StringComparer.OrdinalIgnoreCase)
-            && AvailableModelsForSelectedProvider.Count > 0)
+
+        if (_syncingProviderSelection)
         {
-            AvailableModelsForSelectedProvider.Insert(0, SoulEditorModelInput);
+            if (!string.IsNullOrWhiteSpace(SoulEditorModelInput)
+                && !AvailableModelsForSelectedProvider.Contains(SoulEditorModelInput, StringComparer.OrdinalIgnoreCase)
+                && AvailableModelsForSelectedProvider.Count > 0)
+            {
+                AvailableModelsForSelectedProvider.Insert(0, SoulEditorModelInput);
+            }
+            if (string.IsNullOrWhiteSpace(SoulEditorModelInput) && AvailableModelsForSelectedProvider.Count > 0)
+            {
+                SoulEditorModelInput = AvailableModelsForSelectedProvider[0];
+            }
         }
-        if (string.IsNullOrWhiteSpace(SoulEditorModelInput) && AvailableModelsForSelectedProvider.Count > 0)
+        else
         {
-            SoulEditorModelInput = AvailableModelsForSelectedProvider[0];
+            if (AvailableModelsForSelectedProvider.Count > 0)
+            {
+                if (string.IsNullOrWhiteSpace(SoulEditorModelInput)
+                    || !AvailableModelsForSelectedProvider.Contains(SoulEditorModelInput, StringComparer.OrdinalIgnoreCase))
+                {
+                    SoulEditorModelInput = AvailableModelsForSelectedProvider[0];
+                }
+            }
+            else
+            {
+                SoulEditorModelInput = "";
+            }
         }
+
+        OnPropertyChanged(nameof(HasModelsForSelectedProvider));
+        OnPropertyChanged(nameof(ShowBotDropdownModelBox));
+        OnPropertyChanged(nameof(ShowBotCustomModelFallbackBox));
     }
 
     [RelayCommand]
@@ -1669,19 +1702,62 @@ public sealed partial class MainViewModel
 
     private async Task LoadBotModelProvidersAsync(bool refresh)
     {
-        if (_wsClient is not { IsConnected: true } || IsLoadingBotModels) return;
+        if ((_wsClient is not { IsConnected: true } && _restClient is null) || IsLoadingBotModels) return;
         IsLoadingBotModels = true;
+        BotProvidersStatusSummary = AppLocalization.T("Loading server providers...", "正在同步服务端 API 提供商...");
         try
         {
             var sessionId = _activeRuntimeSessionId ?? ActiveSession?.StoredSessionId ?? ActiveSession?.Id;
-            var items = await _wsClient.GetModelProvidersAsync(sessionId, refresh);
+            var targetProfile = SelectedProfile?.Name;
+
+            async Task<IReadOnlyList<ModelProviderOption>> LoadFromWsAsync()
+            {
+                if (_wsClient is not { IsConnected: true }) return [];
+                try
+                {
+                    return await _wsClient.GetModelProvidersAsync(sessionId, refresh);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    HermesDesktop.Core.Diagnostics.AppDiagnostics.Log("MODELS_WARN", $"WS model.options failed: {ex.Message}");
+                    return [];
+                }
+            }
+
+            async Task<IReadOnlyList<ModelProviderOption>> LoadFromRestAsync()
+            {
+                if (_restClient is null) return [];
+                try
+                {
+                    return await _restClient.GetServerDefinedProvidersAsync(targetProfile, refresh);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    HermesDesktop.Core.Diagnostics.AppDiagnostics.Log("MODELS_WARN", $"REST server providers failed: {ex.Message}");
+                    return [];
+                }
+            }
+
+            var wsTask = LoadFromWsAsync();
+            var restTask = LoadFromRestAsync();
+            await Task.WhenAll(wsTask, restTask);
+
+            var merged = HermesDesktop.Core.Rpc.HermesWsClient.MergeModelProviders(wsTask.Result, restTask.Result);
+
             AvailableModelProviders.Clear();
-            foreach (var p in items)
+            foreach (var p in merged)
             {
                 AvailableModelProviders.Add(p);
             }
+
+            BotProvidersStatusSummary = AvailableModelProviders.Count > 0
+                ? AppLocalization.T($"Synced {AvailableModelProviders.Count} server providers", $"已同步服务端 {AvailableModelProviders.Count} 个 API 提供商")
+                : AppLocalization.T("No server providers returned (manual entry enabled)", "服务端未返回提供商列表，可手动填写");
+
             OnPropertyChanged(nameof(HasAnyAvailableModelProviders));
             OnPropertyChanged(nameof(ShowBotDropdownModelPickers));
+            OnPropertyChanged(nameof(ShowBotDropdownModelBox));
+            OnPropertyChanged(nameof(ShowBotCustomModelFallbackBox));
             OnPropertyChanged(nameof(ShowBotManualModelInputs));
 
             SyncProviderSelectionFromStrings(SoulEditorProviderInput, SoulEditorModelInput);
@@ -1689,6 +1765,7 @@ public sealed partial class MainViewModel
         catch (Exception ex)
         {
             HermesDesktop.Core.Diagnostics.AppDiagnostics.Log("MODELS_WARN", $"LoadBotModelProvidersAsync failed: {ex.Message}");
+            BotProvidersStatusSummary = AppLocalization.T("Could not load server providers", "服务端 API 提供商加载失败");
         }
         finally
         {
@@ -1698,27 +1775,47 @@ public sealed partial class MainViewModel
 
     private void SyncProviderSelectionFromStrings(string provider, string model)
     {
-        if (AvailableModelProviders.Count == 0) return;
+        if (AvailableModelProviders.Count == 0)
+        {
+            AvailableModelsForSelectedProvider.Clear();
+            OnPropertyChanged(nameof(HasModelsForSelectedProvider));
+            OnPropertyChanged(nameof(ShowBotDropdownModelBox));
+            OnPropertyChanged(nameof(ShowBotCustomModelFallbackBox));
+            return;
+        }
 
         ModelProviderOption? match = null;
         if (!string.IsNullOrWhiteSpace(provider))
         {
             var norm = provider.Trim();
+            var customNorm = norm.StartsWith("custom:", StringComparison.OrdinalIgnoreCase) ? norm : $"custom:{norm}";
             match = AvailableModelProviders.FirstOrDefault(p =>
                 string.Equals(p.Slug, norm, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(p.Slug, customNorm, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(p.DisplayName, norm, StringComparison.OrdinalIgnoreCase)
                 || p.Aliases.Any(a => string.Equals(a, norm, StringComparison.OrdinalIgnoreCase)));
         }
         match ??= AvailableModelProviders.FirstOrDefault(p => p.IsCurrent) ?? AvailableModelProviders[0];
 
-        SelectedModelProviderOption = match;
-        if (!string.IsNullOrWhiteSpace(model))
+        _syncingProviderSelection = true;
+        try
         {
-            if (!AvailableModelsForSelectedProvider.Contains(model, StringComparer.OrdinalIgnoreCase))
+            SelectedModelProviderOption = match;
+            if (!string.IsNullOrWhiteSpace(model))
             {
-                AvailableModelsForSelectedProvider.Insert(0, model);
+                if (!AvailableModelsForSelectedProvider.Contains(model, StringComparer.OrdinalIgnoreCase))
+                {
+                    AvailableModelsForSelectedProvider.Insert(0, model);
+                    OnPropertyChanged(nameof(HasModelsForSelectedProvider));
+                    OnPropertyChanged(nameof(ShowBotDropdownModelBox));
+                    OnPropertyChanged(nameof(ShowBotCustomModelFallbackBox));
+                }
+                SoulEditorModelInput = model;
             }
-            SoulEditorModelInput = model;
+        }
+        finally
+        {
+            _syncingProviderSelection = false;
         }
     }
 }

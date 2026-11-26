@@ -53,50 +53,227 @@ public sealed partial class HermesWsClient
             res = await RpcAsync("model.options", p, timeout: TimeSpan.FromSeconds(12), ct: ct);
         }
 
-        var providers = new List<ModelProviderOption>();
-        if (res.ValueKind == JsonValueKind.Object
-            && res.TryGetProperty("providers", out var arr)
-            && arr.ValueKind == JsonValueKind.Array)
+        var providers = DecodeModelProviders(res);
+        if (providers.Count == 0)
         {
-            foreach (var item in arr.EnumerateArray())
+            var fallbackParams = new Dictionary<string, object?>();
+            if (!string.IsNullOrWhiteSpace(sessionId)) fallbackParams["session_id"] = sessionId;
+            try
             {
-                if (item.ValueKind != JsonValueKind.Object) continue;
-                var slug = GetString(item, "slug") ?? GetString(item, "id") ?? GetString(item, "name");
-                if (string.IsNullOrWhiteSpace(slug)) continue;
-
-                var displayName = GetString(item, "name") ?? slug;
-                var isCurrent = GetBool(item, "is_current") == true;
-                var aliases = new List<string>();
-                if (item.TryGetProperty("aliases", out var aliasesEl) && aliasesEl.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var a in aliasesEl.EnumerateArray())
-                    {
-                        if (a.ValueKind == JsonValueKind.String && a.GetString() is { Length: > 0 } al) aliases.Add(al);
-                    }
-                }
-
-                var models = new List<string>();
-                if (item.TryGetProperty("models", out var modelsEl) && modelsEl.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var m in modelsEl.EnumerateArray())
-                    {
-                        if (m.ValueKind == JsonValueKind.String && m.GetString() is { Length: > 0 } mid)
-                        {
-                            models.Add(mid);
-                        }
-                        else if (m.ValueKind == JsonValueKind.Object)
-                        {
-                            var midObj = GetString(m, "id") ?? GetString(m, "name");
-                            if (!string.IsNullOrWhiteSpace(midObj)) models.Add(midObj);
-                        }
-                    }
-                }
-
-                providers.Add(new ModelProviderOption(slug, displayName, aliases, isCurrent, models));
+                var fallbackRes = await RpcAsync("model.options", fallbackParams, timeout: TimeSpan.FromSeconds(12), ct: ct);
+                providers = DecodeModelProviders(fallbackRes);
+            }
+            catch
+            {
+                // Older gateways or empty explicit catalog fall back to REST provider catalog
             }
         }
         return providers;
     }
+
+    public static IReadOnlyList<ModelProviderOption> DecodeModelProviders(JsonElement root)
+    {
+        var providers = new List<ModelProviderOption>();
+        JsonElement arr = default;
+        if (root.ValueKind == JsonValueKind.Array)
+        {
+            arr = root;
+        }
+        else if (root.ValueKind == JsonValueKind.Object)
+        {
+            if (!(root.TryGetProperty("providers", out arr) && arr.ValueKind == JsonValueKind.Array)
+                && !(root.TryGetProperty("options", out arr) && arr.ValueKind == JsonValueKind.Array))
+            {
+                return providers;
+            }
+        }
+        else
+        {
+            return providers;
+        }
+
+        foreach (var item in arr.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object) continue;
+            var slug = TrimNonEmpty(GetString(item, "slug"))
+                ?? TrimNonEmpty(GetString(item, "id"))
+                ?? TrimNonEmpty(GetString(item, "provider"))
+                ?? TrimNonEmpty(GetString(item, "name"));
+            if (string.IsNullOrWhiteSpace(slug)) continue;
+
+            var displayName = TrimNonEmpty(GetString(item, "name"))
+                ?? TrimNonEmpty(GetString(item, "label"))
+                ?? TrimNonEmpty(GetString(item, "display_name"))
+                ?? slug;
+            var isCurrent = GetBool(item, "is_current") == true
+                || GetBool(item, "current") == true
+                || GetBool(item, "active") == true;
+
+            var aliases = new List<string>();
+            var aliasSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            void AddAlias(string? candidate)
+            {
+                var trimmed = TrimNonEmpty(candidate);
+                if (trimmed is not null && aliasSeen.Add(trimmed))
+                {
+                    aliases.Add(trimmed);
+                }
+            }
+
+            AddAlias(slug);
+            AddAlias(GetString(item, "id"));
+            AddAlias(GetString(item, "provider"));
+            AddAlias(GetString(item, "endpoint_id"));
+            if (item.TryGetProperty("aliases", out var aliasesEl) && aliasesEl.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var a in aliasesEl.EnumerateArray())
+                {
+                    if (a.ValueKind == JsonValueKind.String) AddAlias(a.GetString());
+                }
+            }
+
+            var models = new List<string>();
+            var modelSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            void AddModel(string? candidate)
+            {
+                var trimmed = TrimNonEmpty(candidate);
+                if (trimmed is not null && modelSeen.Add(trimmed))
+                {
+                    models.Add(trimmed);
+                }
+            }
+
+            AddModel(GetString(item, "default_model"));
+            AddModel(GetString(item, "model"));
+            if (item.TryGetProperty("models", out var modelsEl) && modelsEl.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var m in modelsEl.EnumerateArray())
+                {
+                    if (m.ValueKind == JsonValueKind.String)
+                    {
+                        AddModel(m.GetString());
+                    }
+                    else if (m.ValueKind == JsonValueKind.Object)
+                    {
+                        var midObj = TrimNonEmpty(GetString(m, "id"))
+                            ?? TrimNonEmpty(GetString(m, "model"))
+                            ?? TrimNonEmpty(GetString(m, "name"))
+                            ?? TrimNonEmpty(GetString(m, "slug"));
+                        AddModel(midObj);
+                    }
+                }
+            }
+
+            providers.Add(new ModelProviderOption(slug, displayName, aliases, isCurrent, models));
+        }
+
+        return providers;
+    }
+
+    public static IReadOnlyList<ModelProviderOption> MergeModelProviders(
+        params IEnumerable<ModelProviderOption>[] sources)
+    {
+        var merged = new List<ModelProviderOption>();
+
+        static bool IsCustomSlug(string s) => s.StartsWith("custom:", StringComparison.OrdinalIgnoreCase);
+
+        static int FindMatchIndex(List<ModelProviderOption> list, ModelProviderOption candidate)
+        {
+            for (var i = 0; i < list.Count; i++)
+            {
+                if (string.Equals(list[i].Slug, candidate.Slug, StringComparison.OrdinalIgnoreCase))
+                {
+                    return i;
+                }
+            }
+
+            var candCustom = IsCustomSlug(candidate.Slug);
+            for (var i = 0; i < list.Count; i++)
+            {
+                var existing = list[i];
+                // Never collapse custom:<id> endpoints into identically named built-in providers
+                if (IsCustomSlug(existing.Slug) != candCustom)
+                {
+                    continue;
+                }
+
+                if (existing.Aliases.Any(a => string.Equals(a, candidate.Slug, StringComparison.OrdinalIgnoreCase))
+                    || candidate.Aliases.Any(a => string.Equals(a, existing.Slug, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        foreach (var source in sources)
+        {
+            if (source is null) continue;
+            foreach (var item in source)
+            {
+                if (string.IsNullOrWhiteSpace(item.Slug)) continue;
+                var idx = FindMatchIndex(merged, item);
+                if (idx < 0)
+                {
+                    var normAliases = item.Aliases
+                        .Where(a => !string.IsNullOrWhiteSpace(a))
+                        .Select(a => a.Trim())
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                    var normModels = item.Models
+                        .Where(m => !string.IsNullOrWhiteSpace(m))
+                        .Select(m => m.Trim())
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                    merged.Add(new ModelProviderOption(
+                        item.Slug.Trim(),
+                        string.IsNullOrWhiteSpace(item.DisplayName) ? item.Slug.Trim() : item.DisplayName.Trim(),
+                        normAliases,
+                        item.IsCurrent,
+                        normModels));
+                    continue;
+                }
+
+                var current = merged[idx];
+                var preferIncomingSlug = IsCustomSlug(item.Slug) && !IsCustomSlug(current.Slug);
+                var nextSlug = preferIncomingSlug ? item.Slug.Trim() : current.Slug;
+                var nextDisplay = string.Equals(current.DisplayName, current.Slug, StringComparison.OrdinalIgnoreCase)
+                    && !string.IsNullOrWhiteSpace(item.DisplayName)
+                    && !string.Equals(item.DisplayName, item.Slug, StringComparison.OrdinalIgnoreCase)
+                        ? item.DisplayName.Trim()
+                        : current.DisplayName;
+
+                var aliasList = new List<string>(current.Aliases.Count + item.Aliases.Count + 2);
+                var aliasSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var a in current.Aliases.Concat([current.Slug, item.Slug]).Concat(item.Aliases))
+                {
+                    var trimmed = TrimNonEmpty(a);
+                    if (trimmed is not null && aliasSeen.Add(trimmed)) aliasList.Add(trimmed);
+                }
+
+                var modelList = new List<string>(current.Models.Count + item.Models.Count);
+                var modelSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var m in current.Models.Concat(item.Models))
+                {
+                    var trimmed = TrimNonEmpty(m);
+                    if (trimmed is not null && modelSeen.Add(trimmed)) modelList.Add(trimmed);
+                }
+
+                merged[idx] = new ModelProviderOption(
+                    nextSlug,
+                    nextDisplay,
+                    aliasList,
+                    current.IsCurrent || item.IsCurrent,
+                    modelList);
+            }
+        }
+
+        return merged;
+    }
+
+    private static string? TrimNonEmpty(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     public async Task ConfigureBotModelAsync(
         string name,

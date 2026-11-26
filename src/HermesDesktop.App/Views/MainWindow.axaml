@@ -1670,10 +1670,12 @@
                 <Border Padding="12" CornerRadius="6" Background="{DynamicResource WinCardSecondaryBrush}"
                         BorderBrush="{DynamicResource WinCardStrokeBrush}" BorderThickness="1">
                   <StackPanel Spacing="10">
-                    <Grid ColumnDefinitions="*,Auto">
+                    <Grid ColumnDefinitions="*,Auto,Auto">
                       <TextBlock Grid.Column="0" Text="{Binding Loc.BotModelSectionHeader}" FontSize="12.5" FontWeight="SemiBold"
                                  Foreground="{DynamicResource WinAccentTextBrush}" VerticalAlignment="Center"/>
-                      <Button Grid.Column="1" Classes="ghost" Content="{Binding Loc.BotRefreshModelsBtn}" FontSize="11" Padding="6,2"
+                      <TextBlock Grid.Column="1" Text="{Binding BotProvidersStatusSummary}" FontSize="11"
+                                 Foreground="{DynamicResource WinTextTertiaryBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                      <Button Grid.Column="2" Classes="ghost" Content="{Binding Loc.BotRefreshModelsBtn}" FontSize="11" Padding="6,2"
                               IsEnabled="{Binding !IsLoadingBotModels}" Command="{Binding RefreshBotModelProvidersCommand}"/>
                     </Grid>
 
@@ -1711,14 +1713,18 @@
                           <ComboBox ItemsSource="{Binding AvailableModelProviders}" SelectedItem="{Binding SelectedModelProviderOption}" HorizontalAlignment="Stretch">
                             <ComboBox.ItemTemplate>
                               <DataTemplate x:DataType="models:ModelProviderOption">
-                                <TextBlock Text="{Binding DisplayName}"/>
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                  <TextBlock Text="{Binding DisplayName}"/>
+                                  <TextBlock Text="{Binding Slug}" FontSize="11" Foreground="{DynamicResource WinTextTertiaryBrush}" VerticalAlignment="Center"/>
+                                </StackPanel>
                               </DataTemplate>
                             </ComboBox.ItemTemplate>
                           </ComboBox>
                         </StackPanel>
                         <StackPanel Grid.Column="1" Spacing="4" Margin="8,0,0,0">
                           <TextBlock Text="{Binding Loc.BotModelLabel}" FontSize="11.5" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
-                          <ComboBox ItemsSource="{Binding AvailableModelsForSelectedProvider}" SelectedItem="{Binding SoulEditorModelInput}" HorizontalAlignment="Stretch"/>
+                          <ComboBox IsVisible="{Binding ShowBotDropdownModelBox}" ItemsSource="{Binding AvailableModelsForSelectedProvider}" SelectedItem="{Binding SoulEditorModelInput}" HorizontalAlignment="Stretch"/>
+                          <TextBox IsVisible="{Binding ShowBotCustomModelFallbackBox}" Text="{Binding SoulEditorModelInput}" Watermark="e.g. deepseek-chat / gpt-4o"/>
                         </StackPanel>
                       </Grid>
 

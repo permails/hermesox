@@ -30,6 +30,268 @@ public sealed class HermesRestClient : IDisposable
         _http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(60) };
     }
 
+    public async Task<IReadOnlyList<ModelProviderOption>> GetServerDefinedProvidersAsync(
+        string? profile = null,
+        bool refresh = false,
+        CancellationToken ct = default)
+    {
+        var hasCustomProfile = !string.IsNullOrWhiteSpace(profile)
+            && !string.Equals(profile.Trim(), "default", StringComparison.OrdinalIgnoreCase);
+        var profileSuffix = hasCustomProfile ? $"profile={Uri.EscapeDataString(profile!.Trim())}" : "";
+
+        async Task<IReadOnlyList<ModelProviderOption>> TryFetchModelOptionsAsync()
+        {
+            var query = new List<string> { "explicit_only=true" };
+            if (hasCustomProfile) query.Add(profileSuffix);
+            if (refresh) query.Add("refresh=true");
+            try
+            {
+                using var doc = await GetJsonAsync($"/api/model/options?{string.Join("&", query)}", ct);
+                var decoded = Rpc.HermesWsClient.DecodeModelProviders(doc.RootElement);
+                if (decoded.Count > 0) return decoded;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                HermesDesktop.Core.Diagnostics.AppDiagnostics.Log("REST_PROVIDERS", $"GET /api/model/options explicit failed: {ex.Message}");
+            }
+
+            try
+            {
+                var path = hasCustomProfile ? $"/api/model/options?{profileSuffix}" : "/api/model/options";
+                using var fallbackDoc = await GetJsonAsync(path, ct);
+                return Rpc.HermesWsClient.DecodeModelProviders(fallbackDoc.RootElement);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                HermesDesktop.Core.Diagnostics.AppDiagnostics.Log("REST_PROVIDERS", $"GET /api/model/options fallback failed: {ex.Message}");
+                return [];
+            }
+        }
+
+        async Task<IReadOnlyList<ModelProviderOption>> TryFetchCustomEndpointsAsync(string? targetProfile)
+        {
+            try
+            {
+                var path = !string.IsNullOrWhiteSpace(targetProfile)
+                    && !string.Equals(targetProfile.Trim(), "default", StringComparison.OrdinalIgnoreCase)
+                    ? $"/api/providers/custom-endpoints?profile={Uri.EscapeDataString(targetProfile.Trim())}"
+                    : "/api/providers/custom-endpoints";
+                using var doc = await GetJsonAsync(path, ct);
+                return DecodeCustomEndpointProviders(doc.RootElement);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return [];
+            }
+        }
+
+        async Task<IReadOnlyList<ModelProviderOption>> TryFetchOAuthAsync()
+        {
+            try
+            {
+                using var doc = await GetJsonAsync("/api/providers/oauth", ct);
+                return DecodeOAuthProviders(doc.RootElement, signedInOnly: true);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return [];
+            }
+        }
+
+        async Task<IReadOnlyList<ModelProviderOption>> TryFetchEnvAsync(string? targetProfile)
+        {
+            try
+            {
+                var path = !string.IsNullOrWhiteSpace(targetProfile)
+                    && !string.Equals(targetProfile.Trim(), "default", StringComparison.OrdinalIgnoreCase)
+                    ? $"/api/env?profile={Uri.EscapeDataString(targetProfile.Trim())}"
+                    : "/api/env";
+                using var doc = await GetJsonAsync(path, ct);
+                return DecodeConfiguredEnvProviders(doc.RootElement);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return [];
+            }
+        }
+
+        var optionsTask = TryFetchModelOptionsAsync();
+        var profileEndpointsTask = TryFetchCustomEndpointsAsync(profile);
+        var defaultEndpointsTask = hasCustomProfile ? TryFetchCustomEndpointsAsync(null) : Task.FromResult<IReadOnlyList<ModelProviderOption>>([]);
+        var oauthTask = TryFetchOAuthAsync();
+        var profileEnvTask = TryFetchEnvAsync(profile);
+        var defaultEnvTask = hasCustomProfile ? TryFetchEnvAsync(null) : Task.FromResult<IReadOnlyList<ModelProviderOption>>([]);
+
+        await Task.WhenAll(optionsTask, profileEndpointsTask, defaultEndpointsTask, oauthTask, profileEnvTask, defaultEnvTask);
+
+        return Rpc.HermesWsClient.MergeModelProviders(
+            optionsTask.Result,
+            profileEndpointsTask.Result,
+            defaultEndpointsTask.Result,
+            oauthTask.Result,
+            profileEnvTask.Result,
+            defaultEnvTask.Result);
+    }
+
+    public static IReadOnlyList<ModelProviderOption> DecodeCustomEndpointProviders(JsonElement root)
+    {
+        JsonElement arr = default;
+        if (root.ValueKind == JsonValueKind.Array)
+        {
+            arr = root;
+        }
+        else if (root.ValueKind == JsonValueKind.Object)
+        {
+            if (!(root.TryGetProperty("endpoints", out arr) && arr.ValueKind == JsonValueKind.Array))
+            {
+                return [];
+            }
+        }
+        else
+        {
+            return [];
+        }
+
+        var list = new List<ModelProviderOption>();
+        foreach (var row in arr.EnumerateArray())
+        {
+            if (row.ValueKind != JsonValueKind.Object) continue;
+            var rawId = FirstNonEmpty(GetString(row, "id"), GetString(row, "endpoint_id"), GetString(row, "name"));
+            if (rawId is null) continue;
+
+            var bareId = rawId.StartsWith("custom:", StringComparison.OrdinalIgnoreCase)
+                ? rawId["custom:".Length..].Trim()
+                : rawId;
+            if (string.IsNullOrWhiteSpace(bareId)) continue;
+
+            var slug = $"custom:{bareId}";
+            var displayName = FirstNonEmpty(GetString(row, "name"), GetString(row, "label"), bareId) ?? bareId;
+            var isCurrent = GetBool(row, "is_current") == true;
+            var aliases = new List<string> { slug };
+            if (!aliases.Contains(bareId, StringComparer.OrdinalIgnoreCase)) aliases.Add(bareId);
+
+            var models = new List<string>();
+            var modelSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            void AddModel(string? m)
+            {
+                if (!string.IsNullOrWhiteSpace(m) && modelSeen.Add(m.Trim())) models.Add(m.Trim());
+            }
+
+            AddModel(GetString(row, "model"));
+            if (row.TryGetProperty("models", out var modelsEl) && modelsEl.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in modelsEl.EnumerateArray())
+                {
+                    if (item.ValueKind == JsonValueKind.String)
+                    {
+                        AddModel(item.GetString());
+                    }
+                    else if (item.ValueKind == JsonValueKind.Object)
+                    {
+                        AddModel(FirstNonEmpty(GetString(item, "id"), GetString(item, "model"), GetString(item, "name")));
+                    }
+                }
+            }
+
+            list.Add(new ModelProviderOption(slug, displayName, aliases, isCurrent, models));
+        }
+
+        return list;
+    }
+
+    public static IReadOnlyList<ModelProviderOption> DecodeOAuthProviders(JsonElement root, bool signedInOnly = true)
+    {
+        JsonElement arr = default;
+        if (root.ValueKind == JsonValueKind.Array)
+        {
+            arr = root;
+        }
+        else if (root.ValueKind == JsonValueKind.Object)
+        {
+            if (!(root.TryGetProperty("providers", out arr) && arr.ValueKind == JsonValueKind.Array))
+            {
+                return [];
+            }
+        }
+        else
+        {
+            return [];
+        }
+
+        var list = new List<ModelProviderOption>();
+        foreach (var row in arr.EnumerateArray())
+        {
+            if (row.ValueKind != JsonValueKind.Object) continue;
+            var id = FirstNonEmpty(GetString(row, "id"), GetString(row, "provider"), GetString(row, "slug"));
+            if (id is null) continue;
+
+            var signedIn = GetBool(row, "logged_in") == true;
+            if (!signedIn && row.TryGetProperty("status", out var statusEl) && statusEl.ValueKind == JsonValueKind.Object)
+            {
+                signedIn = GetBool(statusEl, "logged_in") == true;
+            }
+            if (signedInOnly && !signedIn) continue;
+
+            var name = FirstNonEmpty(GetString(row, "name"), GetString(row, "label"), id) ?? id;
+            list.Add(new ModelProviderOption(id, name, [id], false, []));
+        }
+
+        return list;
+    }
+
+    public static IReadOnlyList<ModelProviderOption> DecodeConfiguredEnvProviders(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object) return [];
+        var map = root.TryGetProperty("env", out var inner) && inner.ValueKind == JsonValueKind.Object
+            ? inner
+            : root;
+
+        var list = new List<ModelProviderOption>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var prop in map.EnumerateObject())
+        {
+            if (prop.Value.ValueKind != JsonValueKind.Object) continue;
+            var row = prop.Value;
+            if (!string.Equals(GetString(row, "category"), "provider", StringComparison.OrdinalIgnoreCase)) continue;
+            if (GetBool(row, "is_set") != true) continue;
+
+            var isPassword = GetBool(row, "is_password") == true;
+            var matchedAnyProfile = false;
+
+            if (row.TryGetProperty("provider_profiles", out var profilesEl) && profilesEl.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var p in profilesEl.EnumerateArray())
+                {
+                    if (p.ValueKind != JsonValueKind.Object) continue;
+                    var primary = p.TryGetProperty("primary", out _) ? GetBool(p, "primary") == true : true;
+                    if (isPassword && !primary) continue;
+
+                    var slug = FirstNonEmpty(GetString(p, "provider"));
+                    if (slug is null) continue;
+                    matchedAnyProfile = true;
+                    if (!seen.Add(slug)) continue;
+
+                    var label = FirstNonEmpty(GetString(p, "provider_label"), slug) ?? slug;
+                    list.Add(new ModelProviderOption(slug, label, [slug], false, []));
+                }
+            }
+
+            if (!matchedAnyProfile)
+            {
+                var slug = FirstNonEmpty(GetString(row, "provider"));
+                if (slug is null) continue;
+                var primary = isPassword ? (GetBool(row, "provider_primary") ?? true) : true;
+                if (!primary || !seen.Add(slug)) continue;
+
+                var label = FirstNonEmpty(GetString(row, "provider_label"), slug) ?? slug;
+                list.Add(new ModelProviderOption(slug, label, [slug], false, []));
+            }
+        }
+
+        return list;
+    }
+
     public async Task<IReadOnlyList<BotProfile>> GetProfilesAsync(CancellationToken ct = default)
     {
         using var doc = await GetJsonAsync("/api/profiles", ct);
