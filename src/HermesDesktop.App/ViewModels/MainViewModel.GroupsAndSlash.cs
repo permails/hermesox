@@ -67,6 +67,12 @@ public sealed partial class MainViewModel
 
     [ObservableProperty] private bool _isTranscriptSelectionMode;
     [ObservableProperty] private string _transcriptSelectionText = "";
+    [ObservableProperty] private bool _isGlobalCopiedFeedback;
+    private CancellationTokenSource? _globalCopiedCts;
+
+    public string GlobalCopyButtonText => IsGlobalCopiedFeedback ? Loc.CopiedBtn : Loc.CopyBtn;
+
+    partial void OnIsGlobalCopiedFeedbackChanged(bool value) => OnPropertyChanged(nameof(GlobalCopyButtonText));
 
     public bool HasOpenOverlayModal =>
         ShowConnectOverlay || IsPreviewModalOpen || IsConfirmingDeleteSession || IsConfirmingRenameSession
@@ -80,7 +86,62 @@ public sealed partial class MainViewModel
         var text = ExtractCopyableMessageText(item);
         if (string.IsNullOrWhiteSpace(text)) return;
         CopyTextRequested?.Invoke(text);
-        StatusBanner = Loc.CopiedBtn;
+        item.TriggerCopiedFeedback();
+    }
+
+    [RelayCommand]
+    private async Task CopyGlobalConversationAsync()
+    {
+        var fullText = BuildFullTranscriptPlainText();
+        if (string.IsNullOrWhiteSpace(fullText))
+        {
+            StatusBanner = AppLocalization.T("Current session has no text to copy.", "当前会话暂无可复制内容。");
+            return;
+        }
+        CopyTextRequested?.Invoke(fullText);
+        try
+        {
+            _globalCopiedCts?.Cancel();
+            _globalCopiedCts?.Dispose();
+            var cts = new CancellationTokenSource();
+            _globalCopiedCts = cts;
+            IsGlobalCopiedFeedback = true;
+            await Task.Delay(1800, cts.Token);
+            if (!cts.IsCancellationRequested)
+            {
+                IsGlobalCopiedFeedback = false;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded by another click
+        }
+    }
+
+    private async Task RefreshContextBreakdownAsync(string sessionId, int openGen)
+    {
+        if (_wsClient is not { IsConnected: true } || string.IsNullOrWhiteSpace(sessionId)) return;
+        try
+        {
+            var breakdown = await _wsClient.GetContextBreakdownAsync(sessionId);
+            if (openGen != _openSessionGeneration || breakdown is null) return;
+            var (pct, used, max) = breakdown.Value;
+            if (max > 0)
+            {
+                ContextUsed = used;
+                ContextMax = max;
+                ContextPercent = pct;
+                HermesDesktop.Core.Diagnostics.AppDiagnostics.Log(
+                    "CONTEXT",
+                    $"Refreshed context breakdown session={sessionId} used={used} max={max} pct={pct:0.#}");
+            }
+        }
+        catch (Exception ex)
+        {
+            HermesDesktop.Core.Diagnostics.AppDiagnostics.Log(
+                "CONTEXT_WARN",
+                $"session.context_breakdown skipped/failed session={sessionId}: {ex.Message}");
+        }
     }
 
     [RelayCommand]

@@ -34,6 +34,16 @@ public partial class App : Application
             var notifications = new DesktopNotificationService();
             var vm = new MainViewModel(cache, vault, notifications);
 
+            Dispatcher.UIThread.UnhandledException += (_, e) =>
+            {
+                AppDiagnostics.LogCrash("UI_DISPATCHER_UNHANDLED", e.Exception);
+                if (e.Exception is not (OutOfMemoryException or StackOverflowException or AccessViolationException))
+                {
+                    e.Handled = true;
+                    vm.StatusBanner = $"Unexpected UI error recorded to log: {e.Exception.Message}";
+                }
+            };
+
             desktop.MainWindow = new MainWindow
             {
                 DataContext = vm

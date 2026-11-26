@@ -6,6 +6,33 @@ namespace HermesDesktop.Core.Rpc;
 
 public sealed partial class HermesWsClient
 {
+    public async Task<(double Percent, int Used, int Max)?> GetContextBreakdownAsync(
+        string sessionId,
+        CancellationToken ct = default)
+    {
+        var res = await RpcAsync(
+            "session.context_breakdown",
+            new Dictionary<string, object?> { ["session_id"] = sessionId },
+            timeout: TimeSpan.FromSeconds(10),
+            ct: ct);
+
+        var max = GetInt(res, "context_max") ?? 0;
+        var used = GetInt(res, "context_used") ?? GetInt(res, "estimated_total") ?? 0;
+        if (used <= 0 && res.TryGetProperty("categories", out var cats) && cats.ValueKind == JsonValueKind.Array)
+        {
+            var sum = 0;
+            foreach (var c in cats.EnumerateArray())
+            {
+                sum += GetInt(c, "tokens") ?? 0;
+            }
+            if (sum > 0) used = sum;
+        }
+        var rawPct = GetDouble(res, "context_percent");
+        if (max <= 0 && used <= 0 && rawPct is null) return null;
+        var pct = StreamEventParser.NormalizeContextPercent(rawPct, used, max);
+        return (pct, used, max);
+    }
+
     public async Task RenameSessionAsync(string sessionId, string title, string? profile = null, CancellationToken ct = default)
     {
         if (!SpeaksSessionAuthority)

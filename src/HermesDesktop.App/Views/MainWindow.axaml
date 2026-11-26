@@ -234,6 +234,12 @@
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                   <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsRunningTurn}" Width="68" Height="4" Foreground="{DynamicResource WinAccentFillBrush}" VerticalAlignment="Center"/>
                   <Button Classes="subtle" Content="{Binding Loc.Stop}" IsVisible="{Binding IsRunningTurn}" Command="{Binding InterruptTurnCommand}"/>
+                  <Button Classes="subtle" Content="{Binding GlobalCopyButtonText}"
+                          IsEnabled="{Binding !IsGlobalCopiedFeedback}"
+                          IsVisible="{Binding HasActiveSession}"
+                          ToolTip.Tip="{Binding Loc.CopyAllTip}"
+                          FontSize="12" Padding="10,4"
+                          Command="{Binding CopyGlobalConversationCommand}"/>
                   <Button Classes="ghost" Content="×" FontSize="14" Padding="8,4"
                           Foreground="{DynamicResource WinErrorBannerTextBrush}"
                           ToolTip.Tip="{Binding Loc.DeleteSessionTip}"
@@ -293,8 +299,10 @@
                                                         DownloadCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).DownloadRemoteFileCommand}"/>
                           <SelectableTextBlock IsVisible="{Binding HasVisibleContent}" Text="{Binding Content}" TextWrapping="Wrap" FontSize="13.5" LineHeight="20" Foreground="{DynamicResource WinTextPrimaryBrush}"/>
                           <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
-                            <Button Classes="ghost" Content="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.CopyBtn}"
-                                    FontSize="10.5" Padding="5,1" Foreground="{DynamicResource WinTextTertiaryBrush}"
+                            <Button Classes="ghost" Content="{Binding CopyButtonLabel}"
+                                    IsEnabled="{Binding !IsCopiedFeedback}"
+                                    ToolTip.Tip="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.CopyMessageTip}"
+                                    FontSize="10.5" Padding="6,2" Foreground="{DynamicResource WinTextTertiaryBrush}"
                                     IsVisible="{Binding HasVisibleContent}"
                                     Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).CopyMessageCommand}"
                                     CommandParameter="{Binding}"/>
@@ -362,25 +370,17 @@
                               BorderThickness="1" CornerRadius="8" Padding="16,12">
                         <StackPanel Spacing="10">
                           <!-- Agent Identity Attribution Header -->
-                          <Grid ColumnDefinitions="*,Auto">
-                            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
-                              <Border Width="20" Height="20" CornerRadius="10" Background="{DynamicResource WinAccentFillBrush}">
-                                <TextBlock Text="{Binding $parent[Window].((vm:MainViewModel)DataContext).ActiveReplyAuthorInitial}"
-                                           FontSize="10.5" FontWeight="Bold" Foreground="{DynamicResource WinAccentForegroundBrush}"
-                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                              </Border>
-                              <TextBlock Text="{Binding $parent[Window].((vm:MainViewModel)DataContext).ActiveReplyAuthorName}"
-                                         FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource WinTextPrimaryBrush}" VerticalAlignment="Center"/>
-                              <TextBlock Text="{Binding Timestamp}" FontSize="11" Foreground="{DynamicResource WinTextTertiaryBrush}" VerticalAlignment="Center"
-                                         IsVisible="{Binding Timestamp, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
-                            </StackPanel>
-                            <Button Grid.Column="1" Classes="ghost" Content="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.CopyBtn}"
-                                    FontSize="11" Padding="6,2" Foreground="{DynamicResource WinTextTertiaryBrush}"
-                                    VerticalAlignment="Center"
-                                    IsVisible="{Binding HasVisibleContent}"
-                                    Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).CopyMessageCommand}"
-                                    CommandParameter="{Binding}"/>
-                          </Grid>
+                          <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Border Width="20" Height="20" CornerRadius="10" Background="{DynamicResource WinAccentFillBrush}">
+                              <TextBlock Text="{Binding $parent[Window].((vm:MainViewModel)DataContext).ActiveReplyAuthorInitial}"
+                                         FontSize="10.5" FontWeight="Bold" Foreground="{DynamicResource WinAccentForegroundBrush}"
+                                         HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <TextBlock Text="{Binding $parent[Window].((vm:MainViewModel)DataContext).ActiveReplyAuthorName}"
+                                       FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource WinTextPrimaryBrush}" VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding Timestamp}" FontSize="11" Foreground="{DynamicResource WinTextTertiaryBrush}" VerticalAlignment="Center"
+                                       IsVisible="{Binding Timestamp, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                          </StackPanel>
 
                           <StackPanel IsVisible="{Binding HasReasoning}" Spacing="6">
                             <Button Classes="ghost" Padding="4,2" HorizontalAlignment="Left" Command="{Binding ToggleReasoningCommand}">
@@ -406,6 +406,14 @@
                                                  DownloadCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).DownloadRemoteFileCommand}"
                                                  MediaBytesLoader="{Binding $parent[Window].((vm:MainViewModel)DataContext).MediaBytesLoader}"
                                                  ImageViewerCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenImageViewerCommand}"/>
+                          <Button Classes="ghost" Content="{Binding CopyButtonLabel}"
+                                  IsEnabled="{Binding !IsCopiedFeedback}"
+                                  ToolTip.Tip="{Binding $parent[Window].((vm:MainViewModel)DataContext).Loc.CopyMessageTip}"
+                                  FontSize="10.5" Padding="6,2" Foreground="{DynamicResource WinTextTertiaryBrush}"
+                                  HorizontalAlignment="Right"
+                                  IsVisible="{Binding HasVisibleContent}"
+                                  Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).CopyMessageCommand}"
+                                  CommandParameter="{Binding}"/>
                         </StackPanel>
                       </Border>
 
@@ -1346,10 +1354,13 @@
               <StackPanel Spacing="10">
                 <TextBlock Text="{Binding Loc.LocalDataTitle}" FontWeight="SemiBold" FontSize="14"/>
                 <SelectableTextBlock Text="{Binding DataDirectoryPath}" FontFamily="{StaticResource WinMonoFontFamily}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                <TextBlock Text="{Binding Loc.LocalLogsLabel}" FontWeight="Medium" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
+                <SelectableTextBlock Text="{Binding LogsDirectoryPath}" FontFamily="{StaticResource WinMonoFontFamily}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}"/>
                 <TextBlock Text="{Binding Loc.PortableModeNotice}" IsVisible="{Binding IsPortableMode}" FontSize="12" Foreground="{DynamicResource WinAccentTextBrush}"/>
                 <TextBlock Text="{Binding Loc.DpapiStorageDesc}" FontSize="12" Foreground="{DynamicResource WinTextSecondaryBrush}" TextWrapping="Wrap"/>
                 <StackPanel Orientation="Horizontal" Spacing="8">
                   <Button Classes="subtle" Content="{Binding Loc.OpenDataFolder}" Command="{Binding OpenDataFolderCommand}"/>
+                  <Button Classes="subtle" Content="{Binding Loc.OpenLogsFolderBtn}" Command="{Binding OpenLogsFolderCommand}"/>
                   <Button Classes="subtle" Content="{Binding Loc.DiagnosticsLog}" Command="{Binding OpenDiagnosticsLogCommand}"/>
                 </StackPanel>
               </StackPanel>

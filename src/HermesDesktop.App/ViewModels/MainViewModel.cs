@@ -1340,7 +1340,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                     session.StoredSessionId = resume.StoredSessionId;
                 }
                 SessionCatalogHelper.MergeAliases(session, session, resume.SessionId);
-                AppDiagnostics.Log("SESSION", $"Opened key={resumeKey} -> runtime={resume.SessionId}, stored={resume.StoredSessionId}, running={resume.IsRunning}");
+                AppDiagnostics.Log("SESSION", $"Opened key={resumeKey} -> runtime={resume.SessionId}, stored={resume.StoredSessionId}, running={resume.IsRunning}, ctx={resume.ContextUsed}/{resume.ContextMax} ({resume.ContextPercent:0.#}%)");
 
                 IsRunningTurn = resume.IsRunning;
                 session.IsActive = resume.IsRunning;
@@ -1359,6 +1359,11 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 CurrentModelLabel = string.IsNullOrWhiteSpace(session.Model) ? "default" : session.Model;
             }
 
+            if (ContextMax <= 0 || ContextUsed <= 0)
+            {
+                _ = RefreshContextBreakdownAsync(_activeRuntimeSessionId ?? resumeKey, openGen);
+            }
+
             var historyKey = resume?.StoredSessionId ?? session.StoredSessionId ?? session.Id;
             IReadOnlyList<ChatMessage> messages = [];
             string? historyLoadError = null;
@@ -1373,9 +1378,36 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             catch (Exception histEx)
             {
                 historyLoadError = histEx.Message;
-                AppDiagnostics.Log("HISTORY_ERR", $"History load failed key={historyKey}: {histEx.Message}");
+                AppDiagnostics.LogError("HISTORY_ERR", $"History load failed key={historyKey}", histEx);
             }
             if (openGen != _openSessionGeneration) return;
+
+            // Recover via legacy full WS resume when REST history returned empty or failed
+            if ((messages.Count == 0 && ((session.MessageCount ?? 0) > 0 || !string.IsNullOrEmpty(historyLoadError)))
+                && _wsClient is { IsConnected: true })
+            {
+                try
+                {
+                    var fullResume = await _wsClient.OpenSessionAsync(resumeKey, targetProfile, omitMessages: false);
+                    if (openGen != _openSessionGeneration) return;
+                    if (fullResume.Messages.Count > 0)
+                    {
+                        messages = fullResume.Messages;
+                        historyLoadError = null;
+                        AppDiagnostics.Log("HISTORY", $"Recovered {messages.Count} messages via WS omit_messages=false for key={resumeKey}");
+                    }
+                    if (ContextMax <= 0 && fullResume.ContextMax > 0)
+                    {
+                        ContextUsed = fullResume.ContextUsed;
+                        ContextMax = fullResume.ContextMax;
+                        ContextPercent = fullResume.ContextPercent;
+                    }
+                }
+                catch (Exception legacyEx)
+                {
+                    AppDiagnostics.LogError("HISTORY_WS_WARN", $"Legacy WS resume fallback failed key={resumeKey}", legacyEx);
+                }
+            }
 
             ActiveMessages.Clear();
             _userExpandedRunIds.Clear();
@@ -3373,6 +3405,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    public string LogsDirectoryPath => AppDiagnostics.LogsDirectory;
+
     [RelayCommand]
     private void OpenDataFolder()
     {
@@ -3387,6 +3421,22 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     }
 
     [RelayCommand]
+    private void OpenLogsFolder()
+    {
+        try
+        {
+            var dir = AppDiagnostics.LogsDirectory;
+            Directory.CreateDirectory(dir);
+            Process.Start(new ProcessStartInfo(dir) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            AppDiagnostics.LogError("LOGS_OPEN_ERR", "Cannot open logs folder", ex);
+            StatusBanner = $"Cannot open logs folder: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
     private void OpenDiagnosticsLog()
     {
         try
@@ -3397,6 +3447,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         }
         catch (Exception ex)
         {
+            AppDiagnostics.LogError("LOGS_OPEN_ERR", "Cannot open diagnostics log file", ex);
             StatusBanner = $"Cannot open diagnostics log: {ex.Message}";
         }
     }

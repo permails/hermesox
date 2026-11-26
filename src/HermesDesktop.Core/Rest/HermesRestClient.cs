@@ -163,23 +163,123 @@ public sealed class HermesRestClient : IDisposable
     public async Task<IReadOnlyList<ChatMessage>> GetSessionMessagesAsync(
         string sessionId,
         string? profile = null,
-        int limit = 100,
+        int limit = 200,
         CancellationToken ct = default)
     {
-        var path = $"/api/sessions/{Uri.EscapeDataString(sessionId)}/messages?limit={limit}";
-        if (!string.IsNullOrWhiteSpace(profile) && !profile.Equals("default", StringComparison.OrdinalIgnoreCase))
+        var pageLimit = Math.Clamp(limit, 50, 500);
+        var collectedPages = new List<IReadOnlyList<ChatMessage>>();
+        var offset = 0;
+        var honorsTailContract = false;
+
+        for (var pageIdx = 0; pageIdx < 5; pageIdx++)
         {
-            path += $"&profile={Uri.EscapeDataString(profile)}";
+            var path = $"/api/sessions/{Uri.EscapeDataString(sessionId)}/messages?limit={pageLimit}&offset={offset}&order=latest&include_compacted=true";
+            if (!string.IsNullOrWhiteSpace(profile) && !profile.Equals("default", StringComparison.OrdinalIgnoreCase))
+            {
+                path += $"&profile={Uri.EscapeDataString(profile)}";
+            }
+
+            using var doc = await GetJsonAsync(path, ct);
+            var arr = ExtractMessagesJsonArray(doc.RootElement);
+            if (arr.ValueKind != JsonValueKind.Array) break;
+
+            var parsed = ParseMessagesArray(arr);
+            var rawRowCount = arr.GetArrayLength();
+            var pageOrder = ReadPaginationString(doc.RootElement, "order");
+            var hasMore = ReadPaginationBool(doc.RootElement, "has_more");
+
+            if (pageIdx == 0)
+            {
+                honorsTailContract = string.Equals(pageOrder, "latest", StringComparison.OrdinalIgnoreCase);
+                // Older backends ignore `order=latest` and return from oldest row 0 when `limit` is present;
+                // if page 0 hit the limit without honoring tail contract, fall back to one-shot full fetch.
+                if (!honorsTailContract && rawRowCount >= pageLimit)
+                {
+                    var legacyPath = $"/api/sessions/{Uri.EscapeDataString(sessionId)}/messages";
+                    if (!string.IsNullOrWhiteSpace(profile) && !profile.Equals("default", StringComparison.OrdinalIgnoreCase))
+                    {
+                        legacyPath += $"?profile={Uri.EscapeDataString(profile)}";
+                    }
+                    using var legacyDoc = await GetJsonAsync(legacyPath, ct);
+                    var legacyArr = ExtractMessagesJsonArray(legacyDoc.RootElement);
+                    var fullList = legacyArr.ValueKind == JsonValueKind.Array ? ParseMessagesArray(legacyArr) : parsed;
+                    HermesDesktop.Core.Diagnostics.AppDiagnostics.Log(
+                        "HISTORY",
+                        $"Legacy full fetch session={sessionId} rows={fullList.Count}");
+                    return fullList;
+                }
+            }
+
+            if (parsed.Count > 0)
+            {
+                collectedPages.Add(parsed);
+            }
+
+            if (!honorsTailContract || rawRowCount == 0 || hasMore == false || (hasMore is null && rawRowCount < pageLimit))
+            {
+                break;
+            }
+            offset += rawRowCount;
         }
 
-        using var doc = await GetJsonAsync(path, ct);
-        var list = new List<ChatMessage>();
-        var arr = doc.RootElement.ValueKind == JsonValueKind.Array
-            ? doc.RootElement
-            : doc.RootElement.TryGetProperty("messages", out var m) && m.ValueKind == JsonValueKind.Array
+        if (collectedPages.Count == 0) return [];
+        if (collectedPages.Count == 1)
+        {
+            HermesDesktop.Core.Diagnostics.AppDiagnostics.Log(
+                "HISTORY",
+                $"Fetched tail page session={sessionId} tailOrder={honorsTailContract} messages={collectedPages[0].Count}");
+            return collectedPages[0];
+        }
+
+        // Prepend older pages before newer pages while deduplicating by RowId
+        var merged = new List<ChatMessage>();
+        var seenRowIds = new HashSet<int>();
+        for (var p = collectedPages.Count - 1; p >= 0; p--)
+        {
+            foreach (var m in collectedPages[p])
+            {
+                if (m.RowId.HasValue && !seenRowIds.Add(m.RowId.Value)) continue;
+                merged.Add(m);
+            }
+        }
+        HermesDesktop.Core.Diagnostics.AppDiagnostics.Log(
+            "HISTORY",
+            $"Fetched {collectedPages.Count} tail pages session={sessionId} merged={merged.Count}");
+        return merged;
+    }
+
+    private static JsonElement ExtractMessagesJsonArray(JsonElement root) =>
+        root.ValueKind == JsonValueKind.Array
+            ? root
+            : root.TryGetProperty("messages", out var m) && m.ValueKind == JsonValueKind.Array
                 ? m
                 : default;
 
+    private static string? ReadPaginationString(JsonElement root, string prop)
+    {
+        if (root.ValueKind != JsonValueKind.Object) return null;
+        if (GetString(root, prop) is { } top) return top;
+        if (root.TryGetProperty("pagination", out var pag) && pag.ValueKind == JsonValueKind.Object)
+        {
+            return GetString(pag, prop);
+        }
+        return null;
+    }
+
+    private static bool? ReadPaginationBool(JsonElement root, string prop)
+    {
+        if (root.ValueKind != JsonValueKind.Object) return null;
+        if (GetBool(root, prop) is { } top) return top;
+        if (root.TryGetProperty("pagination", out var pag) && pag.ValueKind == JsonValueKind.Object)
+        {
+            return GetBool(pag, prop);
+        }
+        return null;
+    }
+
+    public static IReadOnlyList<ChatMessage> ParseMessagesArray(JsonElement arr)
+    {
+        var list = new List<ChatMessage>();
         if (arr.ValueKind != JsonValueKind.Array) return list;
 
         var callsById = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -1066,6 +1166,10 @@ public sealed class HermesRestClient : IDisposable
         using var req = new HttpRequestMessage(HttpMethod.Get, uri);
         HermesAuthClient.ApplySecurityHeaders(req.Headers, uri, _secrets);
         using var resp = await _http.SendAsync(req, ct);
+        if (!resp.IsSuccessStatusCode)
+        {
+            HermesDesktop.Core.Diagnostics.AppDiagnostics.Log("REST_HTTP_ERR", $"GET {path} -> {(int)resp.StatusCode} {resp.ReasonPhrase}");
+        }
         resp.EnsureSuccessStatusCode();
         var stream = await resp.Content.ReadAsStreamAsync(ct);
         return await JsonDocument.ParseAsync(stream, cancellationToken: ct);
@@ -1079,6 +1183,10 @@ public sealed class HermesRestClient : IDisposable
             req.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
         HermesAuthClient.ApplySecurityHeaders(req.Headers, uri, _secrets);
         using var resp = await _http.SendAsync(req, ct);
+        if (!resp.IsSuccessStatusCode)
+        {
+            HermesDesktop.Core.Diagnostics.AppDiagnostics.Log("REST_HTTP_ERR", $"POST {path} -> {(int)resp.StatusCode} {resp.ReasonPhrase}");
+        }
         resp.EnsureSuccessStatusCode();
         var stream = await resp.Content.ReadAsStreamAsync(ct);
         return await JsonDocument.ParseAsync(stream, cancellationToken: ct);

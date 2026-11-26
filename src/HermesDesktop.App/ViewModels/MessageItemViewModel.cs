@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using HermesDesktop.App.Localization;
 using HermesDesktop.Core.Localization;
 using HermesDesktop.Core.Models;
 
@@ -330,4 +331,34 @@ public sealed partial class MessageItemViewModel : ObservableObject
 
     partial void OnApprovalChanged(ApprovalActivity? value) => OnPropertyChanged(nameof(IsApprovalPending));
     partial void OnClarifyChanged(ClarifyActivity? value) => OnPropertyChanged(nameof(IsClarifyPending));
+
+    private CancellationTokenSource? _copiedCts;
+
+    [ObservableProperty]
+    private bool _isCopiedFeedback;
+
+    public string CopyButtonLabel => IsCopiedFeedback ? LocStrings.Instance.CopiedBtn : LocStrings.Instance.CopyBtn;
+
+    partial void OnIsCopiedFeedbackChanged(bool value) => OnPropertyChanged(nameof(CopyButtonLabel));
+
+    public async void TriggerCopiedFeedback()
+    {
+        try
+        {
+            _copiedCts?.Cancel();
+            _copiedCts?.Dispose();
+            var cts = new CancellationTokenSource();
+            _copiedCts = cts;
+            IsCopiedFeedback = true;
+            await Task.Delay(1800, cts.Token);
+            if (!cts.IsCancellationRequested)
+            {
+                IsCopiedFeedback = false;
+            }
+        }
+        catch
+        {
+            // Ignore cancellation/timer disposal
+        }
+    }
 }

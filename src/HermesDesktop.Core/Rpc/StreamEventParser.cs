@@ -191,9 +191,9 @@ public static class StreamEventParser
             case "session.context":
             {
                 if (!hasPayload) return null;
-                var pct = GetDouble(payload, "context_percent") ?? 0;
                 var used = GetInt(payload, "context_used") ?? 0;
                 var max = GetInt(payload, "context_max") ?? 0;
+                var pct = NormalizeContextPercent(GetDouble(payload, "context_percent"), used, max);
                 return new ContextUpdateEvent(sessionId, pct, used, max);
             }
 
@@ -204,7 +204,7 @@ public static class StreamEventParser
                 var max = GetInt(usage, "context_max");
                 if (max is null or <= 0) return null;
                 var used = GetInt(usage, "context_used") ?? 0;
-                var pct = GetDouble(usage, "context_percent") ?? (used / (double)max.Value * 100.0);
+                var pct = NormalizeContextPercent(GetDouble(usage, "context_percent"), used, max.Value);
                 return new ContextUpdateEvent(sessionId, pct, used, max.Value);
             }
 
@@ -408,5 +408,19 @@ public static class StreamEventParser
             if (!string.IsNullOrWhiteSpace(c)) return c.Trim();
         }
         return null;
+    }
+
+    public static double NormalizeContextPercent(double? rawPercent, int used, int max)
+    {
+        if (used > 0 && max > 0)
+        {
+            return Math.Clamp((double)used / max * 100.0, 0.0, 100.0);
+        }
+        if (rawPercent is > 0)
+        {
+            var val = rawPercent.Value <= 1.0 ? rawPercent.Value * 100.0 : rawPercent.Value;
+            return Math.Clamp(val, 0.0, 100.0);
+        }
+        return 0.0;
     }
 }

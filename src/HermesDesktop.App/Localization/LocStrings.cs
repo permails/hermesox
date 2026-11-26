@@ -306,6 +306,10 @@ public sealed class LocStrings : INotifyPropertyChanged
 
     // Copy / Select All / Export / Rename Session
     public string CopyBtn => L("Copy", "复制");
+    public string CopyAllTip => L("Copy entire conversation (excluding thinking process)", "复制完整对话内容（不含思考过程）");
+    public string CopyMessageTip => L("Copy message (excluding thinking process)", "复制此条内容（不含思考过程）");
+    public string OpenLogsFolderBtn => L("Open Logs Folder", "打开日志目录");
+    public string LocalLogsLabel => L("Local Logs Directory", "本地日志目录");
     public string SelectTextBtn => L("Select", "框选");
     public string SelectAllBtn => L("Select All", "全选");
     public string BackToChatViewBtn => L("Back to Chat View", "返回排版视图");

@@ -44,6 +44,16 @@ public static class AppDataPaths
 
     public static bool IsPortableMode => Directory.Exists(Path.Combine(AppContext.BaseDirectory, "data"));
 
+    public static string LogsDirectory
+    {
+        get
+        {
+            var dir = Path.Combine(GetDataDirectory(), "logs");
+            Directory.CreateDirectory(dir);
+            return dir;
+        }
+    }
+
     public static string CacheDatabasePath => Path.Combine(GetDataDirectory(), "cache.db");
     public static string VaultFilePath => Path.Combine(GetDataDirectory(), "vault.dat");
     public static string SettingsFilePath => Path.Combine(GetDataDirectory(), "settings.json");

@@ -253,6 +253,23 @@ public sealed partial class HermesWsClient : IAsyncDisposable
             }
         }
 
+        var contextUsed = GetInt(res, "context_used") ?? 0;
+        var contextMax = GetInt(res, "context_max") ?? 0;
+        var rawContextPct = GetDouble(res, "context_percent");
+        if (contextMax <= 0 && res.TryGetProperty("context", out var ctxObj) && ctxObj.ValueKind == JsonValueKind.Object)
+        {
+            contextMax = GetInt(ctxObj, "context_max") ?? GetInt(ctxObj, "max") ?? contextMax;
+            if (contextUsed <= 0) contextUsed = GetInt(ctxObj, "context_used") ?? GetInt(ctxObj, "used") ?? contextUsed;
+            rawContextPct ??= GetDouble(ctxObj, "context_percent") ?? GetDouble(ctxObj, "percent");
+        }
+        var contextPct = StreamEventParser.NormalizeContextPercent(rawContextPct, contextUsed, contextMax);
+
+        IReadOnlyList<ChatMessage> fallbackMessages = [];
+        if (!omitMessages && res.TryGetProperty("messages", out var msgArr) && msgArr.ValueKind == JsonValueKind.Array)
+        {
+            fallbackMessages = HermesDesktop.Core.Rest.HermesRestClient.ParseMessagesArray(msgArr);
+        }
+
         return new SessionResumeResult(
             SessionId: resolvedId,
             StoredSessionId: storedId,
@@ -262,10 +279,10 @@ public sealed partial class HermesWsClient : IAsyncDisposable
             Model: GetString(res, "model"),
             Provider: GetString(res, "provider"),
             Cwd: GetString(res, "cwd"),
-            ContextPercent: GetDouble(res, "context_percent") ?? 0,
-            ContextUsed: GetInt(res, "context_used") ?? 0,
-            ContextMax: GetInt(res, "context_max") ?? 0,
-            Messages: []);
+            ContextPercent: contextPct,
+            ContextUsed: contextUsed,
+            ContextMax: contextMax,
+            Messages: fallbackMessages);
     }
 
     public async Task<PromptSubmissionOutcome> SubmitPromptAsync(
