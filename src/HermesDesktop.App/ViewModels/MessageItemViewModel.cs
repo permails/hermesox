@@ -14,6 +14,7 @@ public sealed partial class MessageItemViewModel : ObservableObject
     public MessageRole Role { get; }
     public string Timestamp { get; }
     public string? DisplayKind { get; }
+    public int? RowId { get; }
 
     [ObservableProperty]
     private string _content = string.Empty;
@@ -242,6 +243,7 @@ public sealed partial class MessageItemViewModel : ObservableObject
         Role = model.Role;
         Timestamp = model.Timestamp;
         DisplayKind = model.DisplayKind;
+        RowId = model.RowId;
         _content = model.Content;
         _reasoning = model.Reasoning;
         _tool = model.Tool;
@@ -276,6 +278,22 @@ public sealed partial class MessageItemViewModel : ObservableObject
         OnPropertyChanged(nameof(ToolDisplayTitle));
         OnPropertyChanged(nameof(RunSummaryText));
     }
+
+    public ChatMessage ToChatMessage() => new()
+    {
+        Id = Id,
+        Role = Role,
+        Content = Content,
+        Timestamp = Timestamp,
+        Reasoning = Reasoning,
+        Tool = Tool,
+        Approval = Approval,
+        Clarify = Clarify,
+        DelegateAgent = DelegateAgent,
+        DisplayKind = DisplayKind,
+        RowId = RowId,
+        Attachments = Attachments.Count > 0 ? Attachments.ToList() : null
+    };
 
     partial void OnContentChanged(string value)
     {

@@ -722,4 +722,90 @@ public sealed record GatewayRuntimeStatus(
     }
 }
 
+public sealed record CachedSessionSnapshot(
+    int? Revision,
+    int ContextUsed,
+    int ContextMax,
+    double ContextPercent,
+    string? Model,
+    string? Cwd,
+    IReadOnlyList<ChatMessage> Messages,
+    IReadOnlyList<string> ReferencedMediaKeys);
+
+public static class SessionCacheHelper
+{
+    private static readonly System.Text.RegularExpressions.Regex MarkdownMediaOrLinkRegex =
+        new(@"\[[^\]]*\]\(([^)\s]+)\)", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    public static IReadOnlyList<string> CollectAliasIds(SessionSummary? session, params string?[] extras)
+    {
+        var ids = new List<string>();
+        void Add(string? val)
+        {
+            if (!string.IsNullOrWhiteSpace(val) && !ids.Contains(val, StringComparer.Ordinal))
+            {
+                ids.Add(val.Trim());
+            }
+        }
+        if (session is not null)
+        {
+            Add(session.StoredSessionId);
+            Add(session.Id);
+            Add(session.RuntimeSessionId);
+            foreach (var alt in session.AlternateIds) Add(alt);
+        }
+        foreach (var ex in extras) Add(ex);
+        return ids;
+    }
+
+    public static bool AreMessagesEquivalent(IReadOnlyList<ChatMessage> left, IReadOnlyList<ChatMessage> right)
+    {
+        if (ReferenceEquals(left, right)) return true;
+        if (left.Count != right.Count) return false;
+        for (var i = 0; i < left.Count; i++)
+        {
+            var a = left[i];
+            var b = right[i];
+            if (a.Role != b.Role
+                || a.RowId != b.RowId
+                || !string.Equals(a.Id, b.Id, StringComparison.Ordinal)
+                || !string.Equals(a.Content, b.Content, StringComparison.Ordinal)
+                || !string.Equals(a.Reasoning, b.Reasoning, StringComparison.Ordinal)
+                || (a.Attachments?.Count ?? 0) != (b.Attachments?.Count ?? 0)
+                || !Equals(a.Tool, b.Tool))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public static IReadOnlyList<string> CollectMediaKeys(IEnumerable<ChatMessage> messages)
+    {
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var msg in messages)
+        {
+            if (msg.Attachments is not null)
+            {
+                foreach (var att in msg.Attachments)
+                {
+                    if (!string.IsNullOrWhiteSpace(att.Uri)) keys.Add(att.Uri);
+                }
+            }
+            if (!string.IsNullOrWhiteSpace(msg.Content))
+            {
+                foreach (System.Text.RegularExpressions.Match m in MarkdownMediaOrLinkRegex.Matches(msg.Content))
+                {
+                    var target = m.Groups[1].Value.Trim();
+                    if (!string.IsNullOrEmpty(target) && (target.StartsWith('/') || target.StartsWith("http", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        keys.Add(target);
+                    }
+                }
+            }
+        }
+        return keys.ToList();
+    }
+}
+
 

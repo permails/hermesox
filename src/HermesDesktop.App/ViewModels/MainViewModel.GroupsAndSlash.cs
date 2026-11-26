@@ -430,7 +430,118 @@ public sealed partial class MainViewModel
             BesideSession.Title = newTitle;
             OnPropertyChanged(nameof(BesideSessionDisplayTitle));
         }
+        if (SideOrActiveSessionMatches(target))
+        {
+            PersistActiveSessionSnapshot();
+        }
         StatusBanner = AppLocalization.T($"Renamed session to \"{newTitle}\"", $"已重命名会话为「{newTitle}」");
+    }
+
+    private bool SideOrActiveSessionMatches(SessionSummary target) =>
+        ActiveSession is not null && SessionsMatch(ActiveSession, target, _activeRuntimeSessionId);
+
+    private string ActiveMediaSessionKey(SessionSummary? session = null)
+    {
+        var s = session ?? ActiveSession;
+        return s?.StoredSessionId ?? s?.Id ?? s?.RuntimeSessionId ?? "default";
+    }
+
+    private bool TryHydrateSessionFromLocalCache(SessionSummary session)
+    {
+        if (_activeDashboard is null) return false;
+        var profile = session.Profile ?? SelectedProfile?.Name ?? "default";
+        var aliases = SessionCacheHelper.CollectAliasIds(session);
+        var snap = _cache.LoadSessionSnapshot(_activeDashboard.Id, profile, aliases);
+        if (snap is null || snap.Messages.Count == 0) return false;
+
+        ActiveMessages.Clear();
+        _userExpandedRunIds.Clear();
+        _userCollapsedRunIds.Clear();
+        foreach (var msg in snap.Messages)
+        {
+            ActiveMessages.Add(new MessageItemViewModel(msg));
+        }
+
+        if (snap.ContextMax > 0)
+        {
+            ContextUsed = snap.ContextUsed;
+            ContextMax = snap.ContextMax;
+            ContextPercent = snap.ContextPercent;
+        }
+        if (!string.IsNullOrWhiteSpace(snap.Model)) CurrentModelLabel = snap.Model;
+        if (!string.IsNullOrWhiteSpace(snap.Cwd)) CurrentCwd = snap.Cwd;
+
+        RecomputeTranscriptPresentation(ActiveMessages, IsRunningTurn);
+        TranscriptScrollRequested?.Invoke(true);
+        HermesDesktop.Core.Diagnostics.AppDiagnostics.Log(
+            "CACHE",
+            $"Hydrated {snap.Messages.Count} cached messages for key={aliases.FirstOrDefault()} ctx={snap.ContextUsed}/{snap.ContextMax}");
+        return true;
+    }
+
+    private void PersistActiveSessionSnapshot(IReadOnlyList<ChatMessage>? authoritativeMessages = null, int? revision = null)
+    {
+        if (_activeDashboard is null || ActiveSession is null) return;
+        var list = authoritativeMessages ?? ActiveMessages.Select(m => m.ToChatMessage()).ToList();
+        if (list.Count == 0) return;
+
+        var profile = ActiveSession.Profile ?? SelectedProfile?.Name ?? "default";
+        var aliases = SessionCacheHelper.CollectAliasIds(ActiveSession, _activeRuntimeSessionId);
+        var mediaKeys = SessionCacheHelper.CollectMediaKeys(list);
+        var snap = new CachedSessionSnapshot(
+            Revision: revision,
+            ContextUsed: ContextUsed,
+            ContextMax: ContextMax,
+            ContextPercent: ContextPercent,
+            Model: CurrentModelLabel,
+            Cwd: CurrentCwd,
+            Messages: list,
+            ReferencedMediaKeys: mediaKeys);
+        _cache.SaveSessionSnapshot(_activeDashboard.Id, profile, aliases, snap);
+    }
+
+    private void PurgeDeletedSessionLocalAndInMemory(
+        SessionSummary target,
+        string? deletedRuntime,
+        IReadOnlyList<ChatMessage>? extraMessages = null)
+    {
+        var aliases = SessionCacheHelper.CollectAliasIds(target, deletedRuntime);
+        if (_activeDashboard is not null)
+        {
+            var purgedKeys = _cache.DeleteSessionCacheAndFiles(_activeDashboard.Id, target.Profile ?? SelectedProfile?.Name, aliases);
+            foreach (var mk in purgedKeys)
+            {
+                _mediaBytesCache.TryRemove(mk, out _);
+                _previewHtmlCache.Remove(mk);
+            }
+        }
+
+        if (extraMessages is not null)
+        {
+            foreach (var mk in SessionCacheHelper.CollectMediaKeys(extraMessages))
+            {
+                _mediaBytesCache.TryRemove(mk, out _);
+                _previewHtmlCache.Remove(mk);
+            }
+        }
+
+        // Also purge any pending or uploaded attachment URLs from memory caches
+        if (!string.IsNullOrWhiteSpace(HtmlPreviewFilePath)
+            && extraMessages is not null
+            && SessionCacheHelper.CollectMediaKeys(extraMessages).Contains(HtmlPreviewFilePath, StringComparer.Ordinal))
+        {
+            IsHtmlPreviewPaneOpen = false;
+            HtmlPreviewFilePath = "";
+            HtmlPreviewContent = "";
+        }
+        if (IsPreviewModalOpen && !string.IsNullOrWhiteSpace(PreviewFilePath)
+            && extraMessages is not null
+            && SessionCacheHelper.CollectMediaKeys(extraMessages).Contains(PreviewFilePath, StringComparer.Ordinal))
+        {
+            IsPreviewModalOpen = false;
+            PreviewFilePath = "";
+            PreviewText = "";
+        }
     }
 
     // ---- 4. Export / Download Generated Files (.md, text, binary) ----
@@ -457,14 +568,7 @@ public sealed partial class MainViewModel
                 return;
             }
 
-            if (!_previewHtmlCache.TryGetValue(remotePath, out var content) && _restClient is not null)
-            {
-                content = await _restClient.ReadWorkspaceTextAsync(remotePath, ActiveSession?.Profile ?? SelectedProfile?.Name);
-                if (!string.IsNullOrWhiteSpace(content))
-                {
-                    _previewHtmlCache[remotePath] = content;
-                }
-            }
+            var content = await LoadPreviewHtmlAsync(remotePath);
             if (content is null)
             {
                 StatusBanner = AppLocalization.T($"Could not read {fileName}.", $"无法读取文件：{fileName}");

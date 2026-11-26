@@ -54,6 +54,16 @@ public static class AppDataPaths
         }
     }
 
+    public static string MediaCacheDirectory
+    {
+        get
+        {
+            var dir = Path.Combine(GetDataDirectory(), "media");
+            Directory.CreateDirectory(dir);
+            return dir;
+        }
+    }
+
     public static string CacheDatabasePath => Path.Combine(GetDataDirectory(), "cache.db");
     public static string VaultFilePath => Path.Combine(GetDataDirectory(), "vault.dat");
     public static string SettingsFilePath => Path.Combine(GetDataDirectory(), "settings.json");

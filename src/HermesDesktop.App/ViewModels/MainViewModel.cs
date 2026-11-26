@@ -1089,6 +1089,21 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     {
         if (_restClient is null) return;
         var gen = Interlocked.Increment(ref _sessionsRefreshGeneration);
+
+        if (_activeDashboard is not null && _allSessions.Count == 0)
+        {
+            var cacheProfile = ShowAllProfiles ? "__all__" : (SelectedProfile?.Name ?? "default");
+            var cachedList = _cache.LoadSessionListCache(_activeDashboard.Id, cacheProfile);
+            if (cachedList.Count > 0)
+            {
+                foreach (var s in SessionCatalogHelper.DeduplicateSessions(cachedList))
+                {
+                    _allSessions.Add(s);
+                }
+                ApplySessionFilter();
+            }
+        }
+
         try
         {
             var fetched = new List<SessionSummary>();
@@ -1115,6 +1130,11 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             foreach (var s in SessionCatalogHelper.DeduplicateSessions(fetched))
             {
                 _allSessions.Add(s);
+            }
+            if (_activeDashboard is not null)
+            {
+                var cacheProfile = ShowAllProfiles ? "__all__" : (SelectedProfile?.Name ?? "default");
+                _cache.SaveSessionListCache(_activeDashboard.Id, cacheProfile, _allSessions);
             }
 
             // Retain the currently open session only if it hasn't been persisted with min_messages=1 yet
@@ -1299,10 +1319,12 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         }
 
         var openGen = Interlocked.Increment(ref _openSessionGeneration);
-        IsLoadingMessages = true;
         // Clear previous runtime session ID immediately so in-flight stream events
         // from the old session cannot leak into this session while resume is awaiting.
         ClearActiveTranscriptState();
+
+        var hydratedFromCache = TryHydrateSessionFromLocalCache(session);
+        IsLoadingMessages = !hydratedFromCache;
 
         ComposerText = _cache.LoadDraft(DraftKey(session.Id)) ?? "";
 
@@ -1409,22 +1431,42 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 }
             }
 
-            ActiveMessages.Clear();
-            _userExpandedRunIds.Clear();
-            _userCollapsedRunIds.Clear();
-            foreach (var msg in messages)
+            var hadServerData = messages.Count > 0 || string.IsNullOrEmpty(historyLoadError);
+            if (hadServerData && (!hydratedFromCache || !SessionCacheHelper.AreMessagesEquivalent(
+                    ActiveMessages.Select(m => m.ToChatMessage()).ToList(),
+                    messages)))
             {
-                ActiveMessages.Add(new MessageItemViewModel(msg));
+                ActiveMessages.Clear();
+                _userExpandedRunIds.Clear();
+                _userCollapsedRunIds.Clear();
+                foreach (var msg in messages)
+                {
+                    ActiveMessages.Add(new MessageItemViewModel(msg));
+                }
+                RecomputeTranscriptPresentation(ActiveMessages, IsRunningTurn);
+                TranscriptScrollRequested?.Invoke(true);
             }
-            if (!string.IsNullOrEmpty(historyLoadError))
+
+            if (hadServerData && messages.Count > 0)
             {
-                AppendSystemNotice(AppLocalization.T(
-                    $"Failed to load conversation history: {historyLoadError}",
-                    $"加载会话历史失败：{historyLoadError}"));
-                StatusBanner = AppLocalization.T($"History load failed: {historyLoadError}", $"加载历史失败：{historyLoadError}");
+                PersistActiveSessionSnapshot(messages, resume?.Revision);
             }
-            RecomputeTranscriptPresentation(ActiveMessages, IsRunningTurn);
-            TranscriptScrollRequested?.Invoke(true);
+            else if (!string.IsNullOrEmpty(historyLoadError))
+            {
+                if (hydratedFromCache)
+                {
+                    StatusBanner = AppLocalization.T(
+                        "Offline cached view (will auto-sync when reconnected)",
+                        "当前显示本地缓存内容（恢复连接后自动与服务端同步）");
+                }
+                else
+                {
+                    AppendSystemNotice(AppLocalization.T(
+                        $"Failed to load conversation history: {historyLoadError}",
+                        $"加载会话历史失败：{historyLoadError}"));
+                    StatusBanner = AppLocalization.T($"History load failed: {historyLoadError}", $"加载历史失败：{historyLoadError}");
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -1493,6 +1535,11 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 ? _activeRuntimeSessionId
                 : target.RuntimeSessionId;
 
+            var deletedActive = ActiveSession is not null && SessionsMatch(target, ActiveSession, _activeRuntimeSessionId);
+            IReadOnlyList<ChatMessage>? activeMessagesForPurge = deletedActive
+                ? ActiveMessages.Select(m => m.ToChatMessage()).ToList()
+                : null;
+
             _allSessions.RemoveAll(s => SessionsMatch(s, target, deletedRuntime));
             var deletedKey = SessionAttachmentKey(target);
             _draftAttachmentsBySession.Remove(deletedKey);
@@ -1503,6 +1550,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             {
                 _cache.SaveDraft(DraftKey(target.StoredSessionId), "");
             }
+
+            PurgeDeletedSessionLocalAndInMemory(target, deletedRuntime, activeMessagesForPurge);
 
             if (BesideSession is not null && SessionsMatch(BesideSession, target, deletedRuntime))
             {
@@ -1516,7 +1565,6 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 DismissBackgroundNotice();
             }
 
-            var deletedActive = ActiveSession is not null && SessionsMatch(target, ActiveSession, _activeRuntimeSessionId);
             PendingDeleteSession = null;
             DeleteSessionError = null;
 
@@ -1594,15 +1642,11 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        // Brand-new 0-message drafts or already-removed sessions may return 404 on the server; remove locally cleanly.
-        if (lastNotFound is not null && target.MessageCount is null or 0)
-        {
-            return;
-        }
-
+        // Sessions already absent on the server (HTTP 404) are still cleaned locally.
         if (lastNotFound is not null)
         {
-            throw lastNotFound;
+            AppDiagnostics.Log("SESSION_DEL_404", $"Session {target.Id} already absent on server; removing locally.");
+            return;
         }
     }
 
@@ -3188,14 +3232,29 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
     public async Task<string?> LoadPreviewHtmlAsync(string remotePath)
     {
-        if (_restClient is null || string.IsNullOrWhiteSpace(remotePath)) return null;
+        if (string.IsNullOrWhiteSpace(remotePath)) return null;
         if (_previewHtmlCache.TryGetValue(remotePath, out var cached)) return cached;
+        if (_activeDashboard is not null && ActiveSession is not null)
+        {
+            var aliases = SessionCacheHelper.CollectAliasIds(ActiveSession, _activeRuntimeSessionId);
+            var diskCached = _cache.TryLoadCachedTextAsset(_activeDashboard.Id, aliases, remotePath);
+            if (!string.IsNullOrWhiteSpace(diskCached))
+            {
+                _previewHtmlCache[remotePath] = diskCached;
+                return diskCached;
+            }
+        }
+        if (_restClient is null) return null;
         try
         {
             var content = await _restClient.ReadWorkspaceTextAsync(remotePath, ActiveSession?.Profile ?? SelectedProfile?.Name);
             if (!string.IsNullOrWhiteSpace(content))
             {
                 _previewHtmlCache[remotePath] = content;
+                if (_activeDashboard is not null && ActiveSession is not null)
+                {
+                    _cache.SaveCachedTextAsset(_activeDashboard.Id, ActiveMediaSessionKey(), remotePath, content);
+                }
             }
             return content;
         }
@@ -3276,14 +3335,29 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
     public async Task<byte[]?> LoadMediaBytesAsync(string pathOrUrl)
     {
-        if (_restClient is null || string.IsNullOrWhiteSpace(pathOrUrl)) return null;
+        if (string.IsNullOrWhiteSpace(pathOrUrl)) return null;
         if (_mediaBytesCache.TryGetValue(pathOrUrl, out var cached)) return cached;
+        if (_activeDashboard is not null && ActiveSession is not null)
+        {
+            var aliases = SessionCacheHelper.CollectAliasIds(ActiveSession, _activeRuntimeSessionId);
+            var diskBytes = _cache.TryLoadCachedMediaBytes(_activeDashboard.Id, aliases, pathOrUrl);
+            if (diskBytes is { Length: > 0 })
+            {
+                _mediaBytesCache[pathOrUrl] = diskBytes;
+                return diskBytes;
+            }
+        }
+        if (_restClient is null) return null;
         try
         {
             var bytes = await _restClient.ReadMediaBytesAsync(pathOrUrl, ActiveSession?.Profile ?? SelectedProfile?.Name);
             if (bytes is { Length: > 0 })
             {
                 _mediaBytesCache[pathOrUrl] = bytes;
+                if (_activeDashboard is not null && ActiveSession is not null)
+                {
+                    _cache.SaveCachedMediaBytes(_activeDashboard.Id, ActiveMediaSessionKey(), pathOrUrl, bytes);
+                }
             }
             return bytes;
         }
@@ -3369,13 +3443,11 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 return;
             }
 
-            if (!_previewHtmlCache.TryGetValue(remotePath, out var content))
+            var content = await LoadPreviewHtmlAsync(remotePath) ?? "";
+            if (string.IsNullOrEmpty(content))
             {
-                content = await _restClient.ReadWorkspaceTextAsync(remotePath, ActiveSession?.Profile ?? SelectedProfile?.Name);
-                if (!string.IsNullOrWhiteSpace(content))
-                {
-                    _previewHtmlCache[remotePath] = content;
-                }
+                StatusBanner = AppLocalization.T($"Could not read file: {remotePath}", $"无法读取文件：{remotePath}");
+                return;
             }
             if (remotePath.EndsWith(".html", StringComparison.OrdinalIgnoreCase)
                 || remotePath.EndsWith(".htm", StringComparison.OrdinalIgnoreCase))
@@ -3671,6 +3743,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 ReconcileMessagesInPlace(ActiveMessages, messages);
                 RecomputeTranscriptPresentation(ActiveMessages, IsRunningTurn);
                 TranscriptScrollRequested?.Invoke(false);
+                PersistActiveSessionSnapshot(messages);
             }
         }
         catch (Exception ex)
@@ -3846,6 +3919,10 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                     ActiveSession.IsUnread = false;
                 }
                 ApplyEventToTranscript(ActiveMessages, ev, trackTools: true);
+                if (ev is MessageCompleteEvent or MessageInterruptedEvent)
+                {
+                    PersistActiveSessionSnapshot();
+                }
                 break;
         }
     }
