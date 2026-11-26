@@ -270,6 +270,8 @@ public sealed partial class HermesWsClient : IAsyncDisposable
             fallbackMessages = HermesDesktop.Core.Rest.HermesRestClient.ParseMessagesArray(msgArr);
         }
 
+        var pendingQueue = DecodePendingQueue(res);
+
         return new SessionResumeResult(
             SessionId: resolvedId,
             StoredSessionId: storedId,
@@ -282,7 +284,78 @@ public sealed partial class HermesWsClient : IAsyncDisposable
             ContextPercent: contextPct,
             ContextUsed: contextUsed,
             ContextMax: contextMax,
-            Messages: fallbackMessages);
+            Messages: fallbackMessages,
+            PendingQueue: pendingQueue);
+    }
+
+    public static IReadOnlyList<QueuedPromptEntry> DecodePendingQueue(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object
+            || !root.TryGetProperty("pending", out var pendingEl)
+            || pendingEl.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var items = new List<QueuedPromptEntry>();
+        foreach (var row in pendingEl.EnumerateArray())
+        {
+            if (row.ValueKind != JsonValueKind.Object) continue;
+            var admissionId = GetString(row, "admission_id")?.Trim();
+            var status = GetString(row, "status")?.Trim();
+            if (string.IsNullOrEmpty(admissionId) || string.IsNullOrEmpty(status)) continue;
+
+            items.Add(new QueuedPromptEntry(
+                AdmissionId: admissionId,
+                InputId: GetString(row, "input_id") ?? "",
+                Text: GetString(row, "text") ?? "",
+                Status: status,
+                ExecutionGeneration: GetInt(row, "execution_generation"),
+                Sequence: GetInt(row, "sequence") ?? 0));
+        }
+
+        items.Sort((a, b) => a.Sequence.CompareTo(b.Sequence));
+        return items;
+    }
+
+    public async Task ResolveUnknownPromptAsync(
+        string sessionId,
+        string admissionId,
+        int executionGeneration,
+        CancellationToken ct = default)
+    {
+        await RpcAsync(
+            "prompt.resolve_unknown",
+            new
+            {
+                session_id = sessionId,
+                admission_id = admissionId,
+                execution_generation = executionGeneration
+            },
+            ct: ct);
+    }
+
+    public async Task<int> ResolveAllUnknownPromptsAsync(
+        string sessionId,
+        SessionResumeResult resume,
+        CancellationToken ct = default)
+    {
+        var pending = resume.PendingQueue;
+        if (pending is null || pending.Count == 0) return 0;
+
+        var resolvedCount = 0;
+        foreach (var entry in pending)
+        {
+            if (!string.Equals(entry.Status, "unknown", StringComparison.OrdinalIgnoreCase)) continue;
+            var gen = entry.ExecutionGeneration ?? resume.ExecutionGeneration ?? 0;
+            await ResolveUnknownPromptAsync(
+                string.IsNullOrWhiteSpace(resume.SessionId) ? sessionId : resume.SessionId,
+                entry.AdmissionId,
+                gen,
+                ct);
+            resolvedCount++;
+        }
+        return resolvedCount;
     }
 
     public async Task<PromptSubmissionOutcome> SubmitPromptAsync(

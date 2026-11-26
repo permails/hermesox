@@ -139,4 +139,39 @@ public class SlashCommandParserTests
         Assert.Contains("Compacted 12 messages", done.SummaryText);
         Assert.Contains("32k -> 8k tokens", done.SummaryText);
     }
+
+    [Fact]
+    public void DecodePendingQueue_ExtractsUnknownAndQueuedEntriesOrderedBySequence()
+    {
+        using var doc = JsonDocument.Parse("""
+        {
+          "pending": [
+            {
+              "admission_id": "adm-2",
+              "input_id": "sub-2",
+              "text": "follow up",
+              "status": "queued",
+              "execution_generation": 4,
+              "sequence": 2
+            },
+            {
+              "admission_id": "adm-1",
+              "input_id": "sub-1",
+              "text": "interrupted task",
+              "status": "unknown",
+              "execution_generation": 3,
+              "sequence": 1
+            }
+          ]
+        }
+        """);
+
+        var pending = HermesWsClient.DecodePendingQueue(doc.RootElement);
+        Assert.Equal(2, pending.Count);
+        Assert.Equal("adm-1", pending[0].AdmissionId);
+        Assert.Equal("unknown", pending[0].Status);
+        Assert.Equal(3, pending[0].ExecutionGeneration);
+        Assert.Equal("adm-2", pending[1].AdmissionId);
+        Assert.Equal("queued", pending[1].Status);
+    }
 }

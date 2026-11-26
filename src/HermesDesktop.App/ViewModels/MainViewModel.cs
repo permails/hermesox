@@ -983,6 +983,51 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    [ObservableProperty] private int _unresolvedUnknownQueueCount;
+    public bool HasUnresolvedUnknownQueue => UnresolvedUnknownQueueCount > 0;
+    public string UnresolvedUnknownQueueNotice => AppLocalization.T(
+        $"This session has {UnresolvedUnknownQueueCount} interrupted turn(s) in the gateway's durable queue blocking new messages.",
+        $"该会话在服务端队列中有 {UnresolvedUnknownQueueCount} 条中断未决任务阻塞后续对话，清理后即可恢复发送。");
+    public string ResolveUnknownQueueBtnLabel => AppLocalization.T("Clear & Resume", "清理阻塞并恢复");
+
+    partial void OnUnresolvedUnknownQueueCountChanged(int value)
+    {
+        OnPropertyChanged(nameof(HasUnresolvedUnknownQueue));
+        OnPropertyChanged(nameof(UnresolvedUnknownQueueNotice));
+    }
+
+    [RelayCommand]
+    private async Task ResolveUnknownQueueAsync()
+    {
+        if (_wsClient is null || ActiveSession is null) return;
+        var session = ActiveSession;
+        var profile = session.Profile ?? SelectedProfile?.Name;
+        var storedKey = session.StoredSessionId ?? session.Id;
+        try
+        {
+            StatusBanner = AppLocalization.T("Resolving gateway queue…", "正在清理服务端阻塞队列…");
+            var resumed = await _wsClient.OpenSessionAsync(storedKey, profile);
+            var cleared = await _wsClient.ResolveAllUnknownPromptsAsync(resumed.SessionId, resumed);
+            var refreshed = cleared > 0 ? await _wsClient.OpenSessionAsync(storedKey, profile) : resumed;
+
+            _activeRuntimeSessionId = refreshed.SessionId;
+            session.RuntimeSessionId = refreshed.SessionId;
+            IsRunningTurn = refreshed.IsRunning;
+            session.IsActive = refreshed.IsRunning;
+            UnresolvedUnknownQueueCount = refreshed.PendingQueue?.Count(p => string.Equals(p.Status, "unknown", StringComparison.OrdinalIgnoreCase)) ?? 0;
+            ComposerError = null;
+            StatusBanner = $"Connected · {_activeDashboard?.Label}";
+            AppendSystemNotice(cleared > 0
+                ? AppLocalization.T($"Cleared {cleared} interrupted queue item(s). You can continue chatting now.", $"已清理服务端 {cleared} 条未决中断队列，现在可以继续正常对话。")
+                : AppLocalization.T("Session queue state synced.", "会话队列状态已同步。"));
+        }
+        catch (Exception ex)
+        {
+            StatusBanner = AppLocalization.T($"Resolve failed: {ex.Message}", $"清理失败：{ex.Message}");
+            ComposerError = StatusBanner;
+        }
+    }
+
     private void ClearActiveTranscriptState(string? runtimeSessionId = null)
     {
         _activeRuntimeSessionId = runtimeSessionId;
@@ -996,6 +1041,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         ActiveMessages.Clear();
         IsTranscriptSelectionMode = false;
         IsRunningTurn = false;
+        UnresolvedUnknownQueueCount = 0;
     }
 
     /// <summary>
@@ -1434,6 +1480,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
                 IsRunningTurn = resume.IsRunning;
                 session.IsActive = resume.IsRunning;
+                UnresolvedUnknownQueueCount = resume.PendingQueue?.Count(p => string.Equals(p.Status, "unknown", StringComparison.OrdinalIgnoreCase)) ?? 0;
                 CurrentModelLabel = string.IsNullOrWhiteSpace(resume.Model)
                     ? (string.IsNullOrWhiteSpace(session.Model) ? "default" : session.Model)
                     : resume.Model;
@@ -2053,11 +2100,26 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             // Re-resume once to acquire a fresh live runtime session_id & authoritative running state
             try
             {
-                var resumed = await _wsClient.OpenSessionAsync(sourceSession.StoredSessionId ?? sourceSession.Id, profile);
+                var storedId = sourceSession.StoredSessionId ?? sourceSession.Id;
+                var resumed = await _wsClient.OpenSessionAsync(storedId, profile);
+                var clearedUnknown = await _wsClient.ResolveAllUnknownPromptsAsync(resumed.SessionId, resumed);
+                if (clearedUnknown > 0)
+                {
+                    resumed = await _wsClient.OpenSessionAsync(storedId, profile);
+                    if (IsSourceSessionCurrentlyOpen(sourceSession))
+                    {
+                        UnresolvedUnknownQueueCount = 0;
+                        AppendSystemNotice(AppLocalization.T(
+                            $"Cleared {clearedUnknown} interrupted item(s) in gateway queue and resumed your message.",
+                            $"已自动清理服务端队列中 {clearedUnknown} 条未决中断任务，正在继续发送你的消息。"));
+                    }
+                }
+
                 sourceSession.RuntimeSessionId = resumed.SessionId;
                 if (IsSourceSessionCurrentlyOpen(sourceSession))
                 {
                     _activeRuntimeSessionId = resumed.SessionId;
+                    UnresolvedUnknownQueueCount = resumed.PendingQueue?.Count(p => string.Equals(p.Status, "unknown", StringComparison.OrdinalIgnoreCase)) ?? 0;
                 }
 
                 var retryPrompt = text;
@@ -2153,6 +2215,9 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         || ex.Message.Contains("generation", StringComparison.OrdinalIgnoreCase)
         || ex.Message.Contains("not running", StringComparison.OrdinalIgnoreCase)
         || ex.Message.Contains("not busy", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("outcome-unknown", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("outcome_unknown", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("durable queue", StringComparison.OrdinalIgnoreCase)
         || ex.Message.Contains("queue", StringComparison.OrdinalIgnoreCase);
 
     private async Task<(List<string> FileReferences, List<string> StagedImagePaths, List<Attachment> BubbleAttachments)>

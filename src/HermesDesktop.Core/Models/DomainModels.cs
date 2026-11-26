@@ -470,6 +470,14 @@ public sealed record SessionCreateResult(
     string? StoredSessionId = null,
     string? Profile = null);
 
+public sealed record QueuedPromptEntry(
+    string AdmissionId,
+    string InputId,
+    string Text,
+    string Status,
+    int? ExecutionGeneration,
+    int Sequence);
+
 public sealed record SessionResumeResult(
     string SessionId,
     string? StoredSessionId,
@@ -482,7 +490,8 @@ public sealed record SessionResumeResult(
     double ContextPercent,
     int ContextUsed,
     int ContextMax,
-    IReadOnlyList<ChatMessage> Messages);
+    IReadOnlyList<ChatMessage> Messages,
+    IReadOnlyList<QueuedPromptEntry>? PendingQueue = null);
 
 public enum PromptSubmissionOutcome
 {

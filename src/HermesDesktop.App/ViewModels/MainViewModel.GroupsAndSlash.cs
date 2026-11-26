@@ -1059,11 +1059,25 @@ public sealed partial class MainViewModel
         }
         catch (RpcException ex) when (IsStaleRuntimeSessionError(ex) && _wsClient is not null)
         {
-            var resumed = await _wsClient.OpenSessionAsync(session.StoredSessionId ?? session.Id, profile);
+            var storedId = session.StoredSessionId ?? session.Id;
+            var resumed = await _wsClient.OpenSessionAsync(storedId, profile);
+            var cleared = await _wsClient.ResolveAllUnknownPromptsAsync(resumed.SessionId, resumed);
+            if (cleared > 0)
+            {
+                resumed = await _wsClient.OpenSessionAsync(storedId, profile);
+                if (IsSourceSessionCurrentlyOpen(session))
+                {
+                    UnresolvedUnknownQueueCount = 0;
+                    AppendSystemNotice(AppLocalization.T(
+                        $"Cleared {cleared} interrupted item(s) in gateway queue.",
+                        $"已自动清理服务端队列中 {cleared} 条未决中断任务。"));
+                }
+            }
             session.RuntimeSessionId = resumed.SessionId;
             if (IsSourceSessionCurrentlyOpen(session))
             {
                 _activeRuntimeSessionId = resumed.SessionId;
+                UnresolvedUnknownQueueCount = resumed.PendingQueue?.Count(p => string.Equals(p.Status, "unknown", StringComparison.OrdinalIgnoreCase)) ?? 0;
             }
             return await operation(resumed.SessionId);
         }
@@ -1118,7 +1132,10 @@ public sealed partial class MainViewModel
     private static bool IsStaleRuntimeSessionError(RpcException ex) =>
         ex.Message.Contains("session not found", StringComparison.OrdinalIgnoreCase)
         || ex.Message.Contains("expired", StringComparison.OrdinalIgnoreCase)
-        || ex.Message.Contains("generation", StringComparison.OrdinalIgnoreCase);
+        || ex.Message.Contains("generation", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("outcome-unknown", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("outcome_unknown", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("durable queue", StringComparison.OrdinalIgnoreCase);
 
     private async Task HandleSlashExecOutcomeAsync(SlashExecOutcome outcome, ParsedSlashCommand parsed)
     {
