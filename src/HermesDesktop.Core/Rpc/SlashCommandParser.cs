@@ -119,16 +119,81 @@ public static class SlashCommandParser
 
     public static SlashExecOutcome DecodeExecOutcome(JsonElement root)
     {
-        var type = TryGetString(root, "type") ?? TryGetString(root, "kind") ?? "exec";
-        var title = TryGetString(root, "title");
-        var text = TryGetString(root, "text")
-                   ?? TryGetString(root, "output")
-                   ?? TryGetString(root, "result")
-                   ?? TryGetString(root, "markdown");
-        var message = TryGetString(root, "message");
-        var newSessionId = TryGetString(root, "session_id") ?? TryGetString(root, "new_session_id");
-        var prompt = TryGetString(root, "prompt") ?? TryGetString(root, "resolved_prompt");
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            var rawText = root.ValueKind == JsonValueKind.String ? root.GetString() : null;
+            return new SlashExecOutcome("exec", null, rawText, rawText, null, null);
+        }
+
+        var src = root;
+        if (root.TryGetProperty("payload", out var payloadEl) && payloadEl.ValueKind == JsonValueKind.Object)
+        {
+            src = payloadEl;
+        }
+
+        var type = TryGetString(root, "type")
+                   ?? TryGetString(src, "type")
+                   ?? TryGetString(root, "kind")
+                   ?? TryGetString(src, "kind")
+                   ?? "exec";
+        var okFlag = TryGetBool(root, "ok") ?? TryGetBool(src, "ok");
+
+        var title = TryGetString(root, "title") ?? TryGetString(src, "title");
+        var text = FirstNonEmpty(
+            TryGetString(root, "text"),
+            TryGetString(src, "text"),
+            TryGetString(root, "output"),
+            TryGetString(src, "output"),
+            TryGetString(root, "result"),
+            TryGetString(src, "result"),
+            TryGetString(root, "markdown"),
+            TryGetString(src, "markdown"),
+            TryGetString(root, "content"),
+            TryGetString(src, "content"),
+            TryGetString(root, "summary"),
+            TryGetString(src, "summary"));
+        var message = FirstNonEmpty(
+            TryGetString(root, "message"),
+            TryGetString(src, "message"),
+            TryGetString(root, "notice"),
+            TryGetString(src, "notice"),
+            TryGetString(root, "detail"),
+            TryGetString(src, "detail"),
+            TryGetString(root, "error"),
+            TryGetString(src, "error"));
+
+        if (okFlag == false && !string.IsNullOrWhiteSpace(message))
+        {
+            type = "error";
+        }
+
+        var newSessionId = FirstNonEmpty(
+            TryGetString(root, "session_id"),
+            TryGetString(src, "session_id"),
+            TryGetString(root, "new_session_id"),
+            TryGetString(src, "new_session_id"));
+        var prompt = FirstNonEmpty(
+            TryGetString(root, "prompt"),
+            TryGetString(src, "prompt"),
+            TryGetString(root, "resolved_prompt"),
+            TryGetString(src, "resolved_prompt"));
+
         return new SlashExecOutcome(type, title, text, message, newSessionId, prompt);
+    }
+
+    private static string? FirstNonEmpty(params string?[] candidates)
+    {
+        foreach (var c in candidates)
+        {
+            if (!string.IsNullOrWhiteSpace(c)) return c;
+        }
+        return null;
+    }
+
+    private static bool? TryGetBool(JsonElement el, string propName)
+    {
+        if (!el.TryGetProperty(propName, out var prop)) return null;
+        return prop.ValueKind is JsonValueKind.True or JsonValueKind.False ? prop.GetBoolean() : null;
     }
 
     private static int IndexOfWhitespace(string value)

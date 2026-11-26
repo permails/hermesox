@@ -809,7 +809,6 @@ public sealed partial class MainViewModel
 
         var session = ActiveSession;
         var profile = session.Profile ?? SelectedProfile?.Name;
-        var targetId = _activeRuntimeSessionId ?? session.RuntimeSessionId ?? session.Id;
 
         if (parsed.NormalizedName == "/queue")
         {
@@ -847,23 +846,19 @@ public sealed partial class MainViewModel
             return true;
         }
 
+        if (parsed.NormalizedName is "/compress" or "/compact")
+        {
+            await ExecuteCompressCommandAsync(session, parsed.ArgsText);
+            return true;
+        }
+
         try
         {
             switch (parsed.NormalizedName)
             {
-                case "/compress":
-                case "/compact":
-                    StatusBanner = Loc.SlashCommandCompressing;
-                    AppendSystemNotice(Loc.SlashCommandCompressing);
-                    var summary = await _wsClient.CompressSessionWithSummaryAsync(targetId, parsed.ArgsText, profile);
-                    AppendSystemNotice(summary);
-                    StatusBanner = $"Connected · {_activeDashboard?.Label}";
-                    await OpenSessionAsync(session);
-                    return true;
-
                 case "/stop":
                     await InterruptTurnAsync();
-                    var killed = await _wsClient.StopProcessesAsync(targetId);
+                    var killed = await RunWithSlashSessionRecoveryAsync(session, profile, id => _wsClient.StopProcessesAsync(id));
                     AppendSystemNotice(AppLocalization.T(
                         killed > 0 ? $"Stopped turn and terminated {killed} background process(es)." : "Stopped active turn.",
                         killed > 0 ? $"已停止当前回合，并终止了 {killed} 个后台进程。" : "已停止当前回合。"));
@@ -878,33 +873,41 @@ public sealed partial class MainViewModel
                         return true;
                     }
                     var method = parsed.NormalizedName == "/btw" ? "prompt.btw" : "prompt.background";
-                    var taskId = await _wsClient.StartSideAgentAsync(method, targetId, parsed.ArgsText);
+                    var taskId = await RunWithSlashSessionRecoveryAsync(
+                        session,
+                        profile,
+                        id => _wsClient.StartSideAgentAsync(method, id, parsed.ArgsText));
                     AppendSystemNotice(AppLocalization.T(
                         $"Started side task{(string.IsNullOrWhiteSpace(taskId) ? "" : $" ({taskId})")}: {parsed.ArgsText}",
                         $"已启动后台子任务{(string.IsNullOrWhiteSpace(taskId) ? "" : $"（{taskId}）")}：{parsed.ArgsText}"));
                     return true;
 
                 case "/reload-mcp":
-                    var mcpMsg = await _wsClient.ReloadMcpAsync(targetId, confirm: true);
+                    StatusBanner = Loc.SlashCommandExecuting;
+                    var mcpMsg = await RunWithSlashSessionRecoveryAsync(
+                        session,
+                        profile,
+                        id => ExecuteSlashWithDispatchFallbackAsync(id, parsed.RawCommand, "reload-mcp", "", () => _wsClient.ReloadMcpAsync(id, confirm: true)));
+                    StatusBanner = $"Connected · {_activeDashboard?.Label}";
                     AppendSystemNotice(mcpMsg);
                     return true;
 
                 case "/reload-skills":
-                    var skillMsg = await _wsClient.ReloadSkillsAsync(targetId);
+                    StatusBanner = Loc.SlashCommandExecuting;
+                    var skillMsg = await RunWithSlashSessionRecoveryAsync(
+                        session,
+                        profile,
+                        id => ExecuteSlashWithDispatchFallbackAsync(id, parsed.RawCommand, "reload-skills", "", () => _wsClient.ReloadSkillsAsync(id)));
+                    StatusBanner = $"Connected · {_activeDashboard?.Label}";
                     AppendSystemNotice(skillMsg);
                     return true;
 
                 default:
                     StatusBanner = Loc.SlashCommandExecuting;
-                    SlashExecOutcome outcome;
-                    try
-                    {
-                        outcome = await _wsClient.ExecuteSlashAsync(targetId, parsed.RawCommand);
-                    }
-                    catch (RpcException ex) when (IsMissingMethodError(ex))
-                    {
-                        outcome = await _wsClient.DispatchCommandAsync(targetId, parsed.NormalizedName, parsed.ArgsText);
-                    }
+                    var outcome = await RunWithSlashSessionRecoveryAsync(
+                        session,
+                        profile,
+                        id => ExecuteGatewaySlashWithFallbackAsync(id, parsed));
                     StatusBanner = $"Connected · {_activeDashboard?.Label}";
                     await HandleSlashExecOutcomeAsync(outcome, parsed);
                     return true;
@@ -912,33 +915,244 @@ public sealed partial class MainViewModel
         }
         catch (Exception ex)
         {
-            StatusBanner = $"Slash command failed: {ex.Message}";
-            AppendSystemNotice(AppLocalization.T(
+            StatusBanner = AppLocalization.T($"Command failed: {ex.Message}", $"命令执行失败：{ex.Message}");
+            ComposerError = AppLocalization.T(
                 $"Command {parsed.NormalizedName} failed: {ex.Message}",
-                $"命令 {parsed.NormalizedName} 执行失败：{ex.Message}"));
+                $"命令 {parsed.NormalizedName} 执行失败：{ex.Message}");
+            AppendSystemNotice(ComposerError);
             return true;
         }
     }
 
-    private async Task HandleSlashExecOutcomeAsync(SlashExecOutcome outcome, ParsedSlashCommand parsed)
+    private bool _isCompressingActiveSession;
+
+    private async Task ExecuteCompressCommandAsync(SessionSummary session, string? focusTopic)
     {
-        if (string.Equals(outcome.Type, "prefill", StringComparison.OrdinalIgnoreCase))
+        if (_wsClient is null) return;
+        if (_isCompressingActiveSession)
         {
-            ComposerText = outcome.Prompt ?? outcome.Text ?? "";
+            AppendSystemNotice(AppLocalization.T(
+                "Context compression is already in progress.",
+                "上下文压缩正在进行中，请稍候。"));
             return;
         }
-        if (string.Equals(outcome.Type, "send", StringComparison.OrdinalIgnoreCase))
+
+        _isCompressingActiveSession = true;
+        var profile = session.Profile ?? SelectedProfile?.Name;
+        try
         {
-            var expanded = outcome.Prompt ?? outcome.Text;
+            StatusBanner = Loc.SlashCommandCompressing;
+            AppendSystemNotice(Loc.SlashCommandCompressing);
+
+            var compressResult = await RunWithSlashSessionRecoveryAsync(session, profile, async id =>
+            {
+                try
+                {
+                    return await _wsClient.CompressSessionDetailedAsync(id, focusTopic, profile);
+                }
+                catch (RpcException ex) when (IsMissingMethodError(ex))
+                {
+                    var legacyCmd = string.IsNullOrWhiteSpace(focusTopic) ? "compress" : $"compress {focusTopic.Trim()}";
+                    var legacy = await ExecuteGatewaySlashWithFallbackAsync(
+                        id,
+                        new ParsedSlashCommand("/" + legacyCmd, "/compress", "/compress", focusTopic?.Trim() ?? "", []));
+                    var msg = legacy.Text ?? legacy.Message ?? AppLocalization.T("Session context compressed.", "会话上下文已压缩。");
+                    return new SessionCompressResult("compressed", false, msg, null, false, [], msg, false, false, null, id);
+                }
+            });
+
+            if (!string.IsNullOrWhiteSpace(compressResult.ResolvedSessionId)
+                && IsSourceSessionCurrentlyOpen(session))
+            {
+                _activeRuntimeSessionId = compressResult.ResolvedSessionId;
+                session.RuntimeSessionId = compressResult.ResolvedSessionId;
+            }
+
+            if (compressResult.IsPending)
+            {
+                StatusBanner = AppLocalization.T("Compressing in background…", "上下文正在后台压缩…");
+                AppendSystemNotice(compressResult.SummaryText);
+                return;
+            }
+
+            if (!compressResult.LockHeld && IsSourceSessionCurrentlyOpen(session) && !IsRunningTurn)
+            {
+                // Adopt compressed transcript in-place without clearing _activeRuntimeSessionId or locking Send
+                if (compressResult.HasMessagesPayload)
+                {
+                    ReconcileMessagesInPlace(ActiveMessages, compressResult.Messages);
+                    RecomputeTranscriptPresentation(ActiveMessages, isTurnRunning: false);
+                    PersistActiveSessionSnapshot(compressResult.Messages);
+                }
+                else
+                {
+                    await RefreshActiveSessionMessagesAsync();
+                }
+            }
+
+            if (IsSourceSessionCurrentlyOpen(session))
+            {
+                if (compressResult.SummaryText.Contains('\n'))
+                {
+                    AppendAssistantMarkdownNotice(compressResult.SummaryText);
+                }
+                else
+                {
+                    AppendSystemNotice(compressResult.SummaryText);
+                }
+                var ctxTarget = _activeRuntimeSessionId ?? session.RuntimeSessionId ?? session.Id;
+                _ = RefreshContextBreakdownAsync(ctxTarget, _openSessionGeneration);
+            }
+
+            StatusBanner = $"Connected · {_activeDashboard?.Label}";
+        }
+        catch (Exception ex)
+        {
+            StatusBanner = AppLocalization.T($"Compress failed: {ex.Message}", $"压缩失败：{ex.Message}");
+            ComposerError = AppLocalization.T($"Context compress failed: {ex.Message}", $"上下文压缩失败：{ex.Message}");
+            AppendSystemNotice(ComposerError);
+            HermesDesktop.Core.Diagnostics.AppDiagnostics.Log("COMPRESS_ERR", ex.Message);
+        }
+        finally
+        {
+            _isCompressingActiveSession = false;
+        }
+    }
+
+    private void HandleSessionStatusUpdate(StatusUpdateEvent status)
+    {
+        var kind = status.Kind.Trim().ToLowerInvariant();
+        if (kind is "compacting" or "compressing")
+        {
+            StatusBanner = !string.IsNullOrWhiteSpace(status.Text) ? status.Text : Loc.SlashCommandCompressing;
+            return;
+        }
+
+        if (kind is "compacted" or "compact_complete" or "compression_complete")
+        {
+            StatusBanner = $"Connected · {_activeDashboard?.Label}";
+            if (!IsRunningTurn)
+            {
+                _ = RefreshActiveSessionMessagesAsync();
+            }
+            var ctxTarget = _activeRuntimeSessionId ?? ActiveSession?.RuntimeSessionId ?? ActiveSession?.Id;
+            if (!string.IsNullOrWhiteSpace(ctxTarget))
+            {
+                _ = RefreshContextBreakdownAsync(ctxTarget, _openSessionGeneration);
+            }
+            if (!string.IsNullOrWhiteSpace(status.Text))
+            {
+                AppendSystemNotice(status.Text);
+            }
+        }
+    }
+
+    private async Task<T> RunWithSlashSessionRecoveryAsync<T>(
+        SessionSummary session,
+        string? profile,
+        Func<string, Task<T>> operation)
+    {
+        var targetId = _activeRuntimeSessionId ?? session.RuntimeSessionId ?? session.Id;
+        try
+        {
+            return await operation(targetId);
+        }
+        catch (RpcException ex) when (IsStaleRuntimeSessionError(ex) && _wsClient is not null)
+        {
+            var resumed = await _wsClient.OpenSessionAsync(session.StoredSessionId ?? session.Id, profile);
+            session.RuntimeSessionId = resumed.SessionId;
+            if (IsSourceSessionCurrentlyOpen(session))
+            {
+                _activeRuntimeSessionId = resumed.SessionId;
+            }
+            return await operation(resumed.SessionId);
+        }
+    }
+
+    private async Task<SlashExecOutcome> ExecuteGatewaySlashWithFallbackAsync(string sessionId, ParsedSlashCommand parsed)
+    {
+        if (_wsClient is null) throw new InvalidOperationException("WebSocket is not connected.");
+        try
+        {
+            return await _wsClient.ExecuteSlashAsync(sessionId, parsed.RawCommand);
+        }
+        catch (RpcException rejection) when (!IsStaleRuntimeSessionError(rejection))
+        {
+            try
+            {
+                return await _wsClient.DispatchCommandAsync(sessionId, parsed.NormalizedName, parsed.ArgsText);
+            }
+            catch (RpcException)
+            {
+                if (rejection.Message.Contains("command.dispatch", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw;
+                }
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(rejection).Throw();
+                throw; // unreachable
+            }
+        }
+    }
+
+    private async Task<string> ExecuteSlashWithDispatchFallbackAsync(
+        string sessionId,
+        string rawCommand,
+        string name,
+        string arg,
+        Func<Task<string>> primaryRpc)
+    {
+        if (_wsClient is null) throw new InvalidOperationException("WebSocket is not connected.");
+        try
+        {
+            return await primaryRpc();
+        }
+        catch (RpcException ex) when (IsMissingMethodError(ex))
+        {
+            var outcome = await ExecuteGatewaySlashWithFallbackAsync(
+                sessionId,
+                new ParsedSlashCommand(rawCommand, "/" + name, "/" + name, arg, []));
+            return outcome.Text ?? outcome.Message ?? Loc.SlashCommandDone;
+        }
+    }
+
+    private static bool IsStaleRuntimeSessionError(RpcException ex) =>
+        ex.Message.Contains("session not found", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("expired", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("generation", StringComparison.OrdinalIgnoreCase);
+
+    private async Task HandleSlashExecOutcomeAsync(SlashExecOutcome outcome, ParsedSlashCommand parsed)
+    {
+        if (!string.IsNullOrWhiteSpace(outcome.NewSessionId) && ActiveSession is not null)
+        {
+            _activeRuntimeSessionId = outcome.NewSessionId;
+            ActiveSession.RuntimeSessionId = outcome.NewSessionId;
+        }
+
+        if (string.Equals(outcome.Type, "prefill", StringComparison.OrdinalIgnoreCase))
+        {
+            ComposerText = outcome.Prompt ?? outcome.Text ?? outcome.Message ?? "";
+            return;
+        }
+        if (string.Equals(outcome.Type, "send", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(outcome.Type, "skill", StringComparison.OrdinalIgnoreCase))
+        {
+            var expanded = outcome.Prompt ?? outcome.Message ?? outcome.Text;
             if (!string.IsNullOrWhiteSpace(expanded))
             {
-                ComposerText = expanded;
-                await SendOrQueueAsync();
+                await SubmitChatMessageAsync(expanded, isExpandedSlashPrompt: true);
                 return;
             }
         }
+        if (string.Equals(outcome.Type, "error", StringComparison.OrdinalIgnoreCase))
+        {
+            var errMsg = outcome.Text ?? outcome.Message ?? AppLocalization.T("Command failed.", "命令执行失败。");
+            StatusBanner = errMsg;
+            ComposerError = $"{parsed.NormalizedName}: {errMsg}";
+            AppendSystemNotice($"⚠️ {parsed.NormalizedName}: {errMsg}");
+            return;
+        }
 
-        var output = outcome.Text ?? outcome.Message ?? Loc.SlashCommandDone;
+        var output = outcome.Text ?? outcome.Message ?? AppLocalization.T($"Executed {parsed.NormalizedName}.", $"已执行命令 {parsed.NormalizedName}。");
         if (!string.IsNullOrWhiteSpace(outcome.Title))
         {
             output = $"### {outcome.Title}\n\n{output}";
@@ -1503,6 +1717,7 @@ public sealed partial class MainViewModel
         IsTranscriptSelectionMode = false;
         TranscriptSelectionText = "";
         PendingRenameSession = null;
+        _isCompressingActiveSession = false;
         AvailableModelProviders.Clear();
         AvailableModelsForSelectedProvider.Clear();
         _firstBotProvider = "";

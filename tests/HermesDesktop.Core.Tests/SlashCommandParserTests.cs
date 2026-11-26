@@ -64,5 +64,79 @@ public class SlashCommandParserTests
         Assert.Equal("exec", outcome.Type);
         Assert.Equal("Status", outcome.Title);
         Assert.Equal("OK", outcome.Text);
+
+        using var skillDoc = JsonDocument.Parse("""
+        {
+          "type": "skill",
+          "notice": "Expanded from skill",
+          "message": "Analyze this repository"
+        }
+        """);
+        var skillOutcome = SlashCommandParser.DecodeExecOutcome(skillDoc.RootElement);
+        Assert.Equal("skill", skillOutcome.Type);
+        Assert.Equal("Analyze this repository", skillOutcome.Message);
+
+        using var errDoc = JsonDocument.Parse("""
+        {
+          "ok": false,
+          "error": "Session is busy"
+        }
+        """);
+        var errOutcome = SlashCommandParser.DecodeExecOutcome(errDoc.RootElement);
+        Assert.Equal("error", errOutcome.Type);
+        Assert.Equal("Session is busy", errOutcome.Message);
+    }
+
+    [Fact]
+    public void DecodeCompressResult_ParsesPendingLockHeldAndStructuredSummary()
+    {
+        using var pendingDoc = JsonDocument.Parse("""
+        {
+          "status": "pending",
+          "execution_generation": 9,
+          "session_id": "rt-2"
+        }
+        """);
+        var pending = HermesWsClient.DecodeCompressResult(pendingDoc.RootElement);
+        Assert.True(pending.IsPending);
+        Assert.False(pending.LockHeld);
+        Assert.Equal(9, pending.ExecutionGeneration);
+        Assert.Equal("rt-2", pending.ResolvedSessionId);
+        Assert.False(string.IsNullOrWhiteSpace(pending.SummaryText));
+
+        using var lockDoc = JsonDocument.Parse("""
+        {
+          "lock_held": true,
+          "message": "Compaction already running"
+        }
+        """);
+        var locked = HermesWsClient.DecodeCompressResult(lockDoc.RootElement);
+        Assert.True(locked.LockHeld);
+        Assert.Equal("Compaction already running", locked.SummaryText);
+
+        using var doneDoc = JsonDocument.Parse("""
+        {
+          "status": "compressed",
+          "removed": 12,
+          "execution_generation": 10,
+          "summary": {
+            "headline": "Compacted 12 messages",
+            "token_line": "32k -> 8k tokens",
+            "note": "Preserved tool outputs"
+          },
+          "messages": [
+            { "id": "m1", "role": "assistant", "content": "Summary" }
+          ]
+        }
+        """);
+        var done = HermesWsClient.DecodeCompressResult(doneDoc.RootElement);
+        Assert.False(done.IsPending);
+        Assert.False(done.IsAborted);
+        Assert.True(done.HasMessagesPayload);
+        Assert.Single(done.Messages);
+        Assert.Equal(12, done.Removed);
+        Assert.Equal(10, done.ExecutionGeneration);
+        Assert.Contains("Compacted 12 messages", done.SummaryText);
+        Assert.Contains("32k -> 8k tokens", done.SummaryText);
     }
 }

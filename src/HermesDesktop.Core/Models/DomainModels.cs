@@ -679,6 +679,19 @@ public sealed record ToolsetBackendSnapshot(
     string? ActiveExtractBackend,
     IReadOnlyList<FunctionalApiKeyInfo> SetEnvVars);
 
+public sealed record SessionCompressResult(
+    string? Status,
+    bool LockHeld,
+    string? Message,
+    int? Removed,
+    bool HasMessagesPayload,
+    IReadOnlyList<ChatMessage> Messages,
+    string SummaryText,
+    bool IsPending,
+    bool IsAborted,
+    int? ExecutionGeneration,
+    string? ResolvedSessionId);
+
 public sealed record BotRosterSnapshot(
     IReadOnlyList<BotProfile> Profiles,
     bool SupportsBotProtocol);

@@ -392,6 +392,16 @@ public sealed partial class HermesWsClient
         string? profile = null,
         CancellationToken ct = default)
     {
+        var detailed = await CompressSessionDetailedAsync(sessionId, focusTopic, profile, ct);
+        return detailed.SummaryText;
+    }
+
+    public async Task<SessionCompressResult> CompressSessionDetailedAsync(
+        string sessionId,
+        string? focusTopic = null,
+        string? profile = null,
+        CancellationToken ct = default)
+    {
         var timeout = TimeSpan.FromSeconds(180);
         var trimmedFocus = focusTopic?.Trim();
         JsonElement result;
@@ -418,22 +428,154 @@ public sealed partial class HermesWsClient
                 mutate["execution_generation"] = gen;
             }
             if (!string.IsNullOrWhiteSpace(profile)) mutate["profile"] = profile.Trim();
-            result = await RpcAsync("session.mutate", mutate, timeout: timeout, ct: ct);
+
+            try
+            {
+                result = await RpcAsync("session.mutate", mutate, timeout: timeout, ct: ct);
+            }
+            catch (RpcException ex) when (ex.Code == -32601 || ex.Message.Contains("unknown", StringComparison.OrdinalIgnoreCase))
+            {
+                var p = new Dictionary<string, object?> { ["session_id"] = sessionId };
+                if (!string.IsNullOrWhiteSpace(trimmedFocus)) p["focus_topic"] = trimmedFocus;
+                if (!string.IsNullOrWhiteSpace(profile)) p["profile"] = profile.Trim();
+                result = await RpcAsync("session.compress", p, timeout: timeout, ct: ct);
+            }
         }
 
-        var msg = GetString(result, "message");
-        var status = GetString(result, "status");
-        var removed = GetInt(result, "removed") ?? GetInt(result, "compressed_messages");
-        if (!string.IsNullOrWhiteSpace(msg)) return msg;
-        if (removed.HasValue)
+        var decoded = DecodeCompressResult(result);
+        var sid = decoded.ResolvedSessionId ?? sessionId;
+        if (decoded.ExecutionGeneration.HasValue)
         {
-            return AppLocalization.T(
-                $"Compressed session context ({removed.Value} messages compacted).",
-                $"已压缩会话上下文（共精简 {removed.Value} 条消息）。");
+            _sessionGenerations[sessionId] = decoded.ExecutionGeneration.Value;
+            _sessionGenerations[sid] = decoded.ExecutionGeneration.Value;
         }
-        return !string.IsNullOrWhiteSpace(status)
-            ? AppLocalization.T($"Context compression: {status}", $"上下文压缩结果：{status}")
-            : AppLocalization.T("Session context compressed.", "会话上下文已压缩。");
+        return decoded;
+    }
+
+    public static SessionCompressResult DecodeCompressResult(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            return new SessionCompressResult(
+                null, false, null, null, false, [],
+                AppLocalization.T("Session context compressed.", "会话上下文已压缩。"),
+                false, false, null, null);
+        }
+
+        var status = GetString(root, "status")?.Trim();
+        var lockHeld = GetBool(root, "lock_held") == true;
+        var msg = GetString(root, "message")?.Trim();
+        var removed = GetInt(root, "removed") ?? GetInt(root, "compressed_messages");
+        var gen = GetInt(root, "execution_generation");
+        var resolvedSid = GetString(root, "session_id")?.Trim();
+
+        var isPending = string.Equals(status, "pending", StringComparison.OrdinalIgnoreCase);
+        var isAborted = string.Equals(status, "aborted", StringComparison.OrdinalIgnoreCase);
+
+        string? summaryHeadline = null;
+        string? summaryTokenLine = null;
+        string? summaryNote = null;
+        string? summaryString = null;
+        if (root.TryGetProperty("summary", out var summaryEl))
+        {
+            if (summaryEl.ValueKind == JsonValueKind.String)
+            {
+                summaryString = summaryEl.GetString()?.Trim();
+            }
+            else if (summaryEl.ValueKind == JsonValueKind.Object)
+            {
+                summaryHeadline = GetString(summaryEl, "headline")?.Trim();
+                summaryTokenLine = GetString(summaryEl, "token_line")?.Trim();
+                summaryNote = GetString(summaryEl, "note")?.Trim();
+                if (GetBool(summaryEl, "aborted") == true) isAborted = true;
+            }
+        }
+
+        string? hostOutput = null;
+        if (root.TryGetProperty("host_ack", out var ackEl) && ackEl.ValueKind == JsonValueKind.Object)
+        {
+            hostOutput = GetString(ackEl, "output")?.Trim();
+        }
+
+        var hasMessagesPayload = false;
+        IReadOnlyList<ChatMessage> messages = [];
+        if (root.TryGetProperty("messages", out var msgArr) && msgArr.ValueKind == JsonValueKind.Array)
+        {
+            hasMessagesPayload = true;
+            messages = HermesDesktop.Core.Rest.HermesRestClient.ParseMessagesArray(msgArr);
+        }
+
+        string summaryText;
+        if (lockHeld)
+        {
+            summaryText = !string.IsNullOrWhiteSpace(msg)
+                ? msg!
+                : AppLocalization.T("Context compression is already in progress.", "上下文压缩正在进行中，请稍候。");
+        }
+        else if (isPending)
+        {
+            summaryText = !string.IsNullOrWhiteSpace(msg)
+                ? msg!
+                : AppLocalization.T(
+                    "Context compression is running in the background; transcript will refresh automatically.",
+                    "上下文正在后台压缩，完成后将自动同步（你可以继续发送消息）。");
+        }
+        else if (isAborted)
+        {
+            var detail = summaryHeadline ?? summaryNote ?? summaryString ?? msg;
+            summaryText = !string.IsNullOrWhiteSpace(detail)
+                ? $"⚠️ {detail}"
+                : AppLocalization.T("⚠️ Context compression was aborted; transcript is unchanged.", "⚠️ 上下文压缩已中止，对话内容未变更。");
+        }
+        else
+        {
+            var parts = new[] { summaryHeadline, summaryTokenLine, summaryNote }
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .ToArray();
+            if (parts.Length > 0)
+            {
+                summaryText = string.Join("\n\n", parts);
+            }
+            else if (!string.IsNullOrWhiteSpace(summaryString))
+            {
+                summaryText = summaryString!;
+            }
+            else if (!string.IsNullOrWhiteSpace(hostOutput))
+            {
+                summaryText = hostOutput!;
+            }
+            else if (!string.IsNullOrWhiteSpace(msg))
+            {
+                summaryText = msg!;
+            }
+            else if (removed.HasValue)
+            {
+                summaryText = removed.Value > 0
+                    ? AppLocalization.T(
+                        $"Compressed session context ({removed.Value} messages compacted).",
+                        $"已压缩会话上下文（共精简 {removed.Value} 条消息）。")
+                    : AppLocalization.T("Nothing to compress.", "当前上下文无需压缩。");
+            }
+            else
+            {
+                summaryText = !string.IsNullOrWhiteSpace(status)
+                    ? AppLocalization.T($"Context compression: {status}", $"上下文压缩结果：{status}")
+                    : AppLocalization.T("Session context compressed.", "会话上下文已压缩。");
+            }
+        }
+
+        return new SessionCompressResult(
+            status,
+            lockHeld,
+            msg,
+            removed,
+            hasMessagesPayload,
+            messages,
+            summaryText,
+            isPending,
+            isAborted,
+            gen,
+            resolvedSid);
     }
 
     public async Task<IReadOnlyList<SlashCommandDescriptor>> CommandsCatalogAsync(CancellationToken ct = default)

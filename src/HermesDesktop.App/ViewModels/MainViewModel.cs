@@ -1739,17 +1739,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private async Task CompressContextAsync()
     {
         if (_wsClient is null || ActiveSession is null) return;
-        var targetId = _activeRuntimeSessionId ?? ActiveSession.RuntimeSessionId ?? ActiveSession.Id;
-        try
-        {
-            StatusBanner = "Compressing context...";
-            await _wsClient.CompressSessionAsync(targetId, ActiveSession.Profile ?? SelectedProfile?.Name);
-            StatusBanner = $"Connected · {_activeDashboard?.Label}";
-        }
-        catch (Exception ex)
-        {
-            StatusBanner = $"Compress failed: {ex.Message}";
-        }
+        await ExecuteCompressCommandAsync(ActiveSession, focusTopic: null);
     }
 
     [RelayCommand]
@@ -1906,12 +1896,17 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         });
     }
 
-    [RelayCommand]
+    [RelayCommand(AllowConcurrentExecutions = true)]
     private async Task SendOrQueueAsync()
     {
-        if (IsUploadingAttachments) return;
         var text = ComposerText.Trim();
-        var hasAttachments = PendingAttachments.Count > 0;
+        await SubmitChatMessageAsync(text, isExpandedSlashPrompt: false);
+    }
+
+    private async Task SubmitChatMessageAsync(string text, bool isExpandedSlashPrompt)
+    {
+        if (IsUploadingAttachments) return;
+        var hasAttachments = !isExpandedSlashPrompt && PendingAttachments.Count > 0;
         if (string.IsNullOrEmpty(text) && !hasAttachments) return;
         ComposerError = null;
 
@@ -1931,7 +1926,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
         if (ActiveSession is null)
         {
-            if (!hasAttachments && await TryHandleSlashCommandAsync(text))
+            if (!isExpandedSlashPrompt && !hasAttachments && await TryHandleSlashCommandAsync(text))
             {
                 return;
             }
@@ -1947,19 +1942,22 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 return;
             }
         }
-        else if (!hasAttachments && await TryHandleSlashCommandAsync(text))
+        else if (!isExpandedSlashPrompt && !hasAttachments && await TryHandleSlashCommandAsync(text))
         {
             return;
         }
 
         var sourceSession = ActiveSession;
         var sourceKey = SessionAttachmentKey(sourceSession);
-        var stagedToSend = PendingAttachments.ToList();
-        PendingAttachments.Clear();
-        _draftAttachmentsBySession.Remove(sourceKey);
-        _composerErrorsBySession.Remove(sourceKey);
-        ComposerText = "";
-        _cache.SaveDraft(DraftKey(sourceSession.Id), "");
+        var stagedToSend = isExpandedSlashPrompt ? [] : PendingAttachments.ToList();
+        if (!isExpandedSlashPrompt)
+        {
+            PendingAttachments.Clear();
+            _draftAttachmentsBySession.Remove(sourceKey);
+            _composerErrorsBySession.Remove(sourceKey);
+            ComposerText = "";
+            _cache.SaveDraft(DraftKey(sourceSession.Id), "");
+        }
 
         var profile = sourceSession.Profile ?? SelectedProfile?.Name;
         var targetId = _activeRuntimeSessionId ?? sourceSession.RuntimeSessionId ?? sourceSession.Id;
@@ -2038,7 +2036,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             sourceSession.LastActivityAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             if (IsSourceSessionCurrentlyOpen(sourceSession))
             {
-                if (!queued) IsRunningTurn = true;
+                // Keep turn running cleanly whether accepted as new turn or queued
+                IsRunningTurn = true;
                 _openedSession = sourceSession;
                 sourceSession.TaskStatus = BackgroundTaskState.None;
                 StatusBanner = $"Connected · {_activeDashboard?.Label}";
@@ -2048,10 +2047,10 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 sourceSession.TaskStatus = BackgroundTaskState.Running;
             }
         }
-        catch (RpcException rpcEx) when (rpcEx.Message.Contains("session not found", StringComparison.OrdinalIgnoreCase))
+        catch (RpcException rpcEx) when (IsRecoverablePromptError(rpcEx))
         {
             await DetachStagedImagesAsync(targetId, profile, stagedImagePaths);
-            // Re-resume once to acquire a fresh live runtime session_id and retry
+            // Re-resume once to acquire a fresh live runtime session_id & authoritative running state
             try
             {
                 var resumed = await _wsClient.OpenSessionAsync(sourceSession.StoredSessionId ?? sourceSession.Id, profile);
@@ -2082,7 +2081,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
                 try
                 {
-                    await _wsClient.SubmitPromptAsync(resumed.SessionId, retryPrompt, profile, queued: false);
+                    await _wsClient.SubmitPromptAsync(resumed.SessionId, retryPrompt, profile, queued: resumed.IsRunning);
                 }
                 catch
                 {
@@ -2110,7 +2109,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 if (IsSourceSessionCurrentlyOpen(sourceSession))
                 {
                     IsRunningTurn = false;
-                    AppendSystemNotice($"Send failed: {retryEx.Message}");
+                    ComposerError = AppLocalization.T($"Send failed: {retryEx.Message}", $"发送失败：{retryEx.Message}");
+                    AppendSystemNotice(ComposerError);
                 }
                 else
                 {
@@ -2128,8 +2128,12 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             await DetachStagedImagesAsync(targetId, profile, stagedImagePaths);
             if (IsSourceSessionCurrentlyOpen(sourceSession))
             {
-                if (!queued) IsRunningTurn = false;
-                AppendSystemNotice($"Send failed: {ex.Message}");
+                if (!queued || _streamingAssistantMessage is not { IsStreaming: true })
+                {
+                    IsRunningTurn = false;
+                }
+                ComposerError = AppLocalization.T($"Send failed: {ex.Message}", $"发送失败：{ex.Message}");
+                AppendSystemNotice(ComposerError);
             }
             else if (!queued)
             {
@@ -2142,6 +2146,14 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             AppDiagnostics.Log("SEND_ERR", ex.Message);
         }
     }
+
+    private static bool IsRecoverablePromptError(RpcException ex) =>
+        ex.Message.Contains("session not found", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("expired", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("generation", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("not running", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("not busy", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("queue", StringComparison.OrdinalIgnoreCase);
 
     private async Task<(List<string> FileReferences, List<string> StagedImagePaths, List<Attachment> BubbleAttachments)>
         UploadPendingAttachmentsAsync(
@@ -4050,6 +4062,9 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 break;
             case ModelUpdateEvent model:
                 if (!string.IsNullOrWhiteSpace(model.Model)) CurrentModelLabel = model.Model;
+                break;
+            case StatusUpdateEvent status:
+                HandleSessionStatusUpdate(status);
                 break;
             default:
                 if (ev is MessageCompleteEvent or MessageErrorEvent or MessageInterruptedEvent && ActiveSession is not null)
