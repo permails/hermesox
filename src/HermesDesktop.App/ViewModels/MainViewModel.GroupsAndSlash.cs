@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.Input;
 using HermesDesktop.Core.Localization;
 using HermesDesktop.Core.Models;
 using HermesDesktop.Core.Rpc;
+using HermesDesktop.Core.Sessions;
 
 namespace HermesDesktop.App.ViewModels;
 
@@ -74,8 +75,72 @@ public sealed partial class MainViewModel
 
     partial void OnIsGlobalCopiedFeedbackChanged(bool value) => OnPropertyChanged(nameof(GlobalCopyButtonText));
 
+    [ObservableProperty] private bool _isStartupGateVisible;
+    [ObservableProperty] private bool _isStartupGateReady;
+    [ObservableProperty] private string _startupGateServerName = "";
+    [ObservableProperty] private string _startupGateServerUrl = "";
+    [ObservableProperty] private string? _startupGateError;
+    private SavedDashboard? _startupGateDashboard;
+
+    partial void OnIsStartupGateVisibleChanged(bool value) => OnPropertyChanged(nameof(IsHtmlPreviewWebViewVisible));
+    partial void OnIsStartupGateReadyChanged(bool value)
+    {
+        OnPropertyChanged(nameof(StartupGateHeadline));
+        OnPropertyChanged(nameof(StartupGateDescription));
+        OnPropertyChanged(nameof(IsStartupGateBuffering));
+    }
+    partial void OnStartupGateErrorChanged(string? value)
+    {
+        OnPropertyChanged(nameof(HasStartupGateError));
+        OnPropertyChanged(nameof(StartupGateHeadline));
+        OnPropertyChanged(nameof(StartupGateDescription));
+        OnPropertyChanged(nameof(IsStartupGateBuffering));
+    }
+
+    public bool HasStartupGateError => !string.IsNullOrWhiteSpace(StartupGateError);
+    public bool IsStartupGateBuffering => !IsStartupGateReady && !HasStartupGateError;
+    public string StartupGateHeadline => HasStartupGateError
+        ? Loc.StartupErrorTitle
+        : IsStartupGateReady ? Loc.StartupReadyTitle : Loc.StartupConnectingTitle;
+    public string StartupGateDescription => HasStartupGateError
+        ? (StartupGateError ?? "")
+        : IsStartupGateReady ? Loc.StartupReadyDesc : Loc.StartupConnectingDesc;
+
+    [RelayCommand]
+    public void EnterWorkspace()
+    {
+        if (!IsStartupGateReady) return;
+        IsStartupGateVisible = false;
+    }
+
+    [RelayCommand]
+    private async Task RetryStartupConnectAsync()
+    {
+        var dash = _startupGateDashboard ?? SessionCatalogHelper.ResolveStartupDashboard(SavedDashboards, _settings.ActiveDashboardId);
+        if (dash is null)
+        {
+            OpenConnectFromStartupGate();
+            return;
+        }
+        await TryReconnectSavedAsync(dash, fromStartupGate: true);
+    }
+
+    [RelayCommand]
+    private void OpenConnectFromStartupGate()
+    {
+        var dash = _startupGateDashboard ?? SessionCatalogHelper.ResolveStartupDashboard(SavedDashboards, _settings.ActiveDashboardId);
+        IsStartupGateVisible = false;
+        if (dash is not null)
+        {
+            EditingDashboardId = dash.Id;
+            PopulateConnectFormFromSaved(dash, _vault.LoadSecrets(dash.Id));
+        }
+        ConnectError = StartupGateError;
+        ShowConnectOverlay = true;
+    }
+
     public bool HasOpenOverlayModal =>
-        ShowConnectOverlay || IsPreviewModalOpen || IsConfirmingDeleteSession || IsConfirmingRenameSession
+        IsStartupGateVisible || ShowConnectOverlay || IsPreviewModalOpen || IsConfirmingDeleteSession || IsConfirmingRenameSession
         || IsImageViewerOpen || IsSoulEditorOpen || IsCronEditorOpen
         || IsGroupCreateModalOpen || IsGroupSettingsModalOpen;
 

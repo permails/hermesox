@@ -336,7 +336,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private static readonly double[] HtmlZoomSteps = [0.50, 0.65, 0.75, 0.85, 1.00, 1.15, 1.30, 1.50];
 
     public bool IsHtmlPreviewWebViewVisible =>
-        IsHtmlPreviewPaneOpen && !ShowConnectOverlay && !IsPreviewModalOpen && !IsImageViewerOpen && !IsSoulEditorOpen && !IsCronEditorOpen && !IsConfirmingDeleteSession
+        IsHtmlPreviewPaneOpen && !IsStartupGateVisible && !ShowConnectOverlay && !IsPreviewModalOpen && !IsImageViewerOpen && !IsSoulEditorOpen && !IsCronEditorOpen && !IsConfirmingDeleteSession
         && !IsConfirmingRenameSession && !IsGroupCreateModalOpen && !IsGroupSettingsModalOpen;
     public string HtmlPreviewZoomLabel => $"{Math.Round(HtmlPreviewZoom * 100):0}%";
     public LocStrings Loc => LocStrings.Instance;
@@ -487,7 +487,14 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         var startupDashboard = SessionCatalogHelper.ResolveStartupDashboard(SavedDashboards, _settings.ActiveDashboardId);
         if (startupDashboard is not null)
         {
-            _ = TryReconnectSavedAsync(startupDashboard);
+            _startupGateDashboard = startupDashboard;
+            StartupGateServerName = startupDashboard.Label;
+            StartupGateServerUrl = startupDashboard.NormalizedUrl;
+            IsStartupGateReady = false;
+            StartupGateError = null;
+            ShowConnectOverlay = false;
+            IsStartupGateVisible = true;
+            _ = TryReconnectSavedAsync(startupDashboard, fromStartupGate: true);
         }
     }
 
@@ -821,17 +828,35 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         IsAdvancedProxyExpanded = dashboard.UseCloudflareAccess;
     }
 
-    private async Task TryReconnectSavedAsync(SavedDashboard dashboard)
+    private async Task TryReconnectSavedAsync(SavedDashboard dashboard, bool fromStartupGate = false)
     {
+        if (fromStartupGate)
+        {
+            _startupGateDashboard = dashboard;
+            StartupGateServerName = dashboard.Label;
+            StartupGateServerUrl = dashboard.NormalizedUrl;
+            StartupGateError = null;
+            IsStartupGateReady = false;
+            IsStartupGateVisible = true;
+        }
+
         var secrets = _vault.LoadSecrets(dashboard.Id);
         if (secrets is null)
         {
             EditingDashboardId = dashboard.Id;
             PopulateConnectFormFromSaved(dashboard);
-            ConnectError = AppLocalization.T(
+            var credMsg = AppLocalization.T(
                 "Saved credentials could not be loaded. Please re-enter them and connect.",
                 "未读取到已保存的登录凭据，请重新填写并连接。");
-            ShowConnectOverlay = true;
+            if (fromStartupGate)
+            {
+                StartupGateError = credMsg;
+            }
+            else
+            {
+                ConnectError = credMsg;
+                ShowConnectOverlay = true;
+            }
             return;
         }
 
@@ -847,16 +872,32 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             if (idx >= 0) SavedDashboards[idx] = updated;
             _settings.ActiveDashboardId = updated.Id;
             _cache.SaveSettings(_settings);
-            ShowConnectOverlay = false;
+
+            if (fromStartupGate)
+            {
+                StartupGateError = null;
+                IsStartupGateReady = true;
+            }
+            else
+            {
+                ShowConnectOverlay = false;
+            }
         }
         catch (Exception ex)
         {
             EditingDashboardId = dashboard.Id;
             PopulateConnectFormFromSaved(dashboard, secrets);
             ConnectionPhase = ConnectionPhase.Error;
-            ConnectError = ex.Message;
             StatusBanner = $"Reconnect failed: {ex.Message}";
-            ShowConnectOverlay = true;
+            if (fromStartupGate)
+            {
+                StartupGateError = ex.Message;
+            }
+            else
+            {
+                ConnectError = ex.Message;
+                ShowConnectOverlay = true;
+            }
         }
         finally
         {

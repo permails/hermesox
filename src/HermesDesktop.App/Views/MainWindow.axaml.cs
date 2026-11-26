@@ -412,6 +412,16 @@ public partial class MainWindow : Window
     {
         if (DataContext is not MainViewModel vm) return;
 
+        if (vm.IsStartupGateVisible)
+        {
+            if (vm.IsStartupGateReady && (e.Key == Key.Enter || e.Key == Key.Space))
+            {
+                e.Handled = true;
+                vm.EnterWorkspace();
+            }
+            return;
+        }
+
         if (e.Key == Key.Escape && vm.IsTranscriptSelectionMode && !vm.HasOpenOverlayModal)
         {
             e.Handled = true;
