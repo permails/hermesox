@@ -200,6 +200,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty] private SessionSummary? _pendingDeleteSession;
     [ObservableProperty] private bool _isDeletingSession;
     [ObservableProperty] private string? _deleteSessionError;
+    [ObservableProperty] private bool _canForceRemoveBlockedSessionLocally;
     [ObservableProperty] private bool _isLoadingMessages;
     [ObservableProperty] private SessionSummary? _backgroundNoticeSession;
     [ObservableProperty] private string _backgroundNoticeTitle = "";
@@ -1210,7 +1211,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             var cachedList = _cache.LoadSessionListCache(_activeDashboard.Id, cacheProfile);
             if (cachedList.Count > 0)
             {
-                foreach (var s in SessionCatalogHelper.DeduplicateSessions(cachedList))
+                var visibleCached = SessionCatalogHelper.FilterHiddenSessions(cachedList, GetHiddenSessionIdsForActiveDashboard());
+                foreach (var s in SessionCatalogHelper.DeduplicateSessions(visibleCached))
                 {
                     _allSessions.Add(s);
                 }
@@ -1240,8 +1242,9 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             var previousRuntimeId = _activeRuntimeSessionId;
             var previousAll = _allSessions.ToList();
 
+            var visibleFetched = SessionCatalogHelper.FilterHiddenSessions(fetched, GetHiddenSessionIdsForActiveDashboard());
             _allSessions.Clear();
-            foreach (var s in SessionCatalogHelper.DeduplicateSessions(fetched))
+            foreach (var s in SessionCatalogHelper.DeduplicateSessions(visibleFetched))
             {
                 _allSessions.Add(s);
             }
@@ -1615,6 +1618,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             return;
         }
         DeleteSessionError = null;
+        CanForceRemoveBlockedSessionLocally = false;
         PendingDeleteSession = target;
     }
 
@@ -1623,6 +1627,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     {
         if (IsDeletingSession) return;
         DeleteSessionError = null;
+        CanForceRemoveBlockedSessionLocally = false;
         PendingDeleteSession = null;
     }
 
@@ -1640,73 +1645,28 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         }
 
         DeleteSessionError = null;
+        CanForceRemoveBlockedSessionLocally = false;
         IsDeletingSession = true;
         try
         {
             var profile = target.Profile ?? SelectedProfile?.Name;
-            await DeleteOrArchiveSessionOnServerAsync(target, profile);
-
-            var deletedRuntime = ActiveSession is not null && SessionsMatch(target, ActiveSession, _activeRuntimeSessionId)
-                ? _activeRuntimeSessionId
-                : target.RuntimeSessionId;
-
-            var deletedActive = ActiveSession is not null && SessionsMatch(target, ActiveSession, _activeRuntimeSessionId);
-            IReadOnlyList<ChatMessage>? activeMessagesForPurge = deletedActive
-                ? ActiveMessages.Select(m => m.ToChatMessage()).ToList()
+            var archivedFallback = await DeleteOrArchiveSessionOnServerAsync(target, profile);
+            var statusMessage = archivedFallback
+                ? AppLocalization.T(
+                    "Server locked permanent deletion; archived session out of active list.",
+                    "服务端因未决执行锁暂禁永久删除，已自动将该会话归档并移出列表。")
                 : null;
-
-            _allSessions.RemoveAll(s => SessionsMatch(s, target, deletedRuntime));
-            var deletedKey = SessionAttachmentKey(target);
-            _draftAttachmentsBySession.Remove(deletedKey);
-            _composerErrorsBySession.Remove(deletedKey);
-            _uploadingSessionKeys.Remove(deletedKey);
-            _cache.SaveDraft(DraftKey(target.Id), "");
-            if (!string.IsNullOrEmpty(target.StoredSessionId))
-            {
-                _cache.SaveDraft(DraftKey(target.StoredSessionId), "");
-            }
-
-            PurgeDeletedSessionLocalAndInMemory(target, deletedRuntime, activeMessagesForPurge);
-
-            if (BesideSession is not null && SessionsMatch(BesideSession, target, deletedRuntime))
-            {
-                BesideSession = null;
-                BesideMessages.Clear();
-                IsBesideVisible = false;
-            }
-
-            if (BackgroundNoticeSession is not null && SessionsMatch(BackgroundNoticeSession, target, deletedRuntime))
-            {
-                DismissBackgroundNotice();
-            }
-
-            PendingDeleteSession = null;
-            DeleteSessionError = null;
-
-            if (deletedActive)
-            {
-                PendingAttachments.Clear();
-                ComposerError = null;
-                IsUploadingAttachments = false;
-                Interlocked.Increment(ref _openSessionGeneration);
-                ClearActiveTranscriptState();
-                _openedSession = null;
-                ActiveSession = null;
-                ComposerText = "";
-            }
-
-            ApplySessionFilter();
-
-            if (deletedActive && ActiveSession is null && FilteredSessions.Count > 0)
-            {
-                await SelectAndOpenSessionAsync(FilteredSessions[0]);
-            }
-
-            StatusBanner = $"Connected · {_activeDashboard?.Label}";
+            await RemoveSessionLocallyAndAdvanceSelectionAsync(target, statusMessage);
         }
         catch (Exception ex)
         {
-            DeleteSessionError = ex.Message;
+            var isBlocked = SessionCatalogHelper.IsUnknownExecutionConflict(ex.Message)
+                || (ex.InnerException is not null && SessionCatalogHelper.IsUnknownExecutionConflict(ex.InnerException.Message))
+                || ex is HttpRequestException { StatusCode: System.Net.HttpStatusCode.Conflict or System.Net.HttpStatusCode.Forbidden };
+            CanForceRemoveBlockedSessionLocally = isBlocked;
+            DeleteSessionError = isBlocked && SessionCatalogHelper.IsUnknownExecutionConflict(ex.Message)
+                ? BuildBlockedDeleteMessage(target)
+                : ex.Message;
             StatusBanner = $"Delete failed: {ex.Message}";
             AppDiagnostics.Log("SESSION_DEL_ERR", ex.Message);
         }
@@ -1716,9 +1676,130 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private async Task DeleteOrArchiveSessionOnServerAsync(SessionSummary target, string? profile)
+    [RelayCommand]
+    private async Task ForceRemoveDeleteSessionLocallyAsync()
     {
-        if (_restClient is null) return;
+        var target = PendingDeleteSession;
+        if (target is null || IsDeletingSession) return;
+
+        IsDeletingSession = true;
+        try
+        {
+            if (_activeDashboard is not null)
+            {
+                var dashKey = _activeDashboard.Id.ToString("D");
+                if (!_settings.LocallyHiddenSessions.TryGetValue(dashKey, out var list))
+                {
+                    list = [];
+                    _settings.LocallyHiddenSessions[dashKey] = list;
+                }
+
+                var activeRuntime = ActiveSession is not null && SessionsMatch(target, ActiveSession, _activeRuntimeSessionId)
+                    ? _activeRuntimeSessionId
+                    : target.RuntimeSessionId;
+                foreach (var id in SessionCatalogHelper.CollectSessionIds(target, activeRuntime))
+                {
+                    if (!list.Contains(id, StringComparer.Ordinal))
+                    {
+                        list.Add(id);
+                    }
+                }
+                _cache.SaveSettings(_settings);
+            }
+
+            await RemoveSessionLocallyAndAdvanceSelectionAsync(
+                target,
+                AppLocalization.T(
+                    "Hidden blocked session from this app's sidebar list.",
+                    "已从本机列表移除该卡死会话（如需清理服务端记录，请在主机执行 hermes chat --resume 解锁）。"));
+        }
+        finally
+        {
+            IsDeletingSession = false;
+        }
+    }
+
+    private IReadOnlyCollection<string>? GetHiddenSessionIdsForActiveDashboard()
+    {
+        if (_activeDashboard is null) return null;
+        return _settings.LocallyHiddenSessions.TryGetValue(_activeDashboard.Id.ToString("D"), out var list)
+            ? list
+            : null;
+    }
+
+    private async Task RemoveSessionLocallyAndAdvanceSelectionAsync(SessionSummary target, string? statusMessage)
+    {
+        var deletedRuntime = ActiveSession is not null && SessionsMatch(target, ActiveSession, _activeRuntimeSessionId)
+            ? _activeRuntimeSessionId
+            : target.RuntimeSessionId;
+
+        var deletedActive = ActiveSession is not null && SessionsMatch(target, ActiveSession, _activeRuntimeSessionId);
+        IReadOnlyList<ChatMessage>? activeMessagesForPurge = deletedActive
+            ? ActiveMessages.Select(m => m.ToChatMessage()).ToList()
+            : null;
+
+        _allSessions.RemoveAll(s => SessionsMatch(s, target, deletedRuntime));
+        var deletedKey = SessionAttachmentKey(target);
+        _draftAttachmentsBySession.Remove(deletedKey);
+        _composerErrorsBySession.Remove(deletedKey);
+        _uploadingSessionKeys.Remove(deletedKey);
+        _cache.SaveDraft(DraftKey(target.Id), "");
+        if (!string.IsNullOrEmpty(target.StoredSessionId))
+        {
+            _cache.SaveDraft(DraftKey(target.StoredSessionId), "");
+        }
+
+        PurgeDeletedSessionLocalAndInMemory(target, deletedRuntime, activeMessagesForPurge);
+
+        if (_activeDashboard is not null)
+        {
+            var cacheProfile = ShowAllProfiles ? "__all__" : (SelectedProfile?.Name ?? "default");
+            _cache.SaveSessionListCache(_activeDashboard.Id, cacheProfile, _allSessions);
+        }
+
+        if (BesideSession is not null && SessionsMatch(BesideSession, target, deletedRuntime))
+        {
+            BesideSession = null;
+            BesideMessages.Clear();
+            IsBesideVisible = false;
+        }
+
+        if (BackgroundNoticeSession is not null && SessionsMatch(BackgroundNoticeSession, target, deletedRuntime))
+        {
+            DismissBackgroundNotice();
+        }
+
+        CanForceRemoveBlockedSessionLocally = false;
+        PendingDeleteSession = null;
+        DeleteSessionError = null;
+
+        if (deletedActive)
+        {
+            PendingAttachments.Clear();
+            ComposerError = null;
+            IsUploadingAttachments = false;
+            Interlocked.Increment(ref _openSessionGeneration);
+            ClearActiveTranscriptState();
+            _openedSession = null;
+            ActiveSession = null;
+            ComposerText = "";
+        }
+
+        ApplySessionFilter();
+
+        if (deletedActive && ActiveSession is null && FilteredSessions.Count > 0)
+        {
+            await SelectAndOpenSessionAsync(FilteredSessions[0]);
+        }
+
+        StatusBanner = string.IsNullOrWhiteSpace(statusMessage)
+            ? $"Connected · {_activeDashboard?.Label}"
+            : statusMessage;
+    }
+
+    private async Task<bool> DeleteOrArchiveSessionOnServerAsync(SessionSummary target, string? profile)
+    {
+        if (_restClient is null) return false;
 
         var candidates = new List<string>();
         foreach (var raw in new[] { target.StoredSessionId, target.Id, target.RuntimeSessionId }.Concat(target.AlternateIds))
@@ -1730,14 +1811,16 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         }
 
         HttpRequestException? lastNotFound = null;
+        HttpRequestException? unknownExecutionConflict = null;
         var methodNotAllowed = false;
+        var attemptedWsUnlock = false;
 
         foreach (var candidateId in candidates)
         {
             try
             {
                 await _restClient.DeleteSessionAsync(candidateId, profile);
-                return;
+                return false;
             }
             catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
@@ -1748,21 +1831,85 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 methodNotAllowed = true;
                 break;
             }
+            catch (HttpRequestException ex) when (
+                ex.StatusCode == System.Net.HttpStatusCode.Conflict
+                && SessionCatalogHelper.IsUnknownExecutionConflict(ex.Message))
+            {
+                if (!attemptedWsUnlock && _wsClient is { IsConnected: true })
+                {
+                    attemptedWsUnlock = true;
+                    try
+                    {
+                        var storedKey = target.StoredSessionId ?? target.Id;
+                        var resumed = await _wsClient.OpenSessionAsync(storedKey, profile);
+                        var cleared = await _wsClient.ResolveAllUnknownPromptsAsync(resumed.SessionId, resumed);
+                        if (cleared > 0)
+                        {
+                            await _restClient.DeleteSessionAsync(candidateId, profile);
+                            return false;
+                        }
+                    }
+                    catch
+                    {
+                        // Fall through to archive fallback or clear user guidance
+                    }
+                }
+                unknownExecutionConflict = ex;
+                break;
+            }
         }
 
-        // Older Hermes builds that do not implement DELETE /api/sessions/{id} support archiving it out of the active list.
-        if (methodNotAllowed && candidates.Count > 0)
+        // Fall back to archiving when DELETE is unsupported (405) or blocked by unknown_execution (409).
+        if ((methodNotAllowed || unknownExecutionConflict is not null) && candidates.Count > 0)
         {
-            await _restClient.ArchiveSessionAsync(candidates[0], archived: true, profile);
-            return;
+            Exception? lastArchiveError = null;
+            foreach (var candidateId in candidates)
+            {
+                try
+                {
+                    await _restClient.ArchiveSessionAsync(candidateId, archived: true, profile);
+                    AppDiagnostics.Log("SESSION_DEL_ARCHIVE_FALLBACK", $"Archived session {candidateId} after delete conflict.");
+                    return true;
+                }
+                catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+                {
+                    lastNotFound = ex;
+                }
+                catch (Exception ex)
+                {
+                    lastArchiveError = ex;
+                    break;
+                }
+            }
+
+            if (unknownExecutionConflict is not null)
+            {
+                throw new InvalidOperationException(
+                    BuildBlockedDeleteMessage(target),
+                    lastArchiveError ?? unknownExecutionConflict);
+            }
+            if (lastArchiveError is not null)
+            {
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(lastArchiveError).Throw();
+            }
         }
 
         // Sessions already absent on the server (HTTP 404) are still cleaned locally.
         if (lastNotFound is not null)
         {
             AppDiagnostics.Log("SESSION_DEL_404", $"Session {target.Id} already absent on server; removing locally.");
-            return;
+            return false;
         }
+
+        return false;
+    }
+
+    private static string BuildBlockedDeleteMessage(SessionSummary target)
+    {
+        var sessionKey = target.StoredSessionId ?? target.Id;
+        return AppLocalization.T(
+            $"Server blocked permanent delete/archive because this session has an interrupted gateway execution lock (unknown_execution).\n\nTo unlock on the Hermes server: hermes chat --resume {sessionKey}\nOr click \"Hide From List\" below to remove it from this app immediately.",
+            $"服务端检测到该会话存在未决中断执行锁（unknown_execution），拒绝直接删除或归档。\n\n如需从服务端彻底解锁，请在 Hermes 主机执行：\nhermes chat --resume {sessionKey}\n或点击下方「仅从本机列表移除」，立即将该卡死会话从桌面端移出。");
     }
 
     [RelayCommand]

@@ -205,6 +205,7 @@ public sealed class LocStrings : INotifyPropertyChanged
     public string DeleteProfile => L("Delete Profile", "删除配置文件");
     public string ConfirmDeleteQuestion => L("Confirm delete?", "确认删除？");
     public string YesDelete => L("Yes, Delete", "确认删除");
+    public string HideSessionLocally => L("Hide From List", "仅从本机列表移除");
     public string Keep => L("Keep", "保留");
     public string SoulTabPersonality => L("Overview & Persona", "基础与角色");
     public string SoulTabCapabilities => L("Skills · Tools · MCP", "技能 · 工具 · MCP");

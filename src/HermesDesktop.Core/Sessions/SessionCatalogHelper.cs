@@ -335,6 +335,40 @@ public static class SessionCatalogHelper
         }
     }
 
+    /// <summary>
+    /// Filters out sessions whose primary ID or any alias matches a locally hidden session ID set.
+    /// </summary>
+    public static IReadOnlyList<SessionSummary> FilterHiddenSessions(
+        IEnumerable<SessionSummary> sessions,
+        IReadOnlyCollection<string>? hiddenSessionIds)
+    {
+        if (hiddenSessionIds is null || hiddenSessionIds.Count == 0)
+        {
+            return sessions as IReadOnlyList<SessionSummary> ?? [.. sessions];
+        }
+
+        var hiddenSet = hiddenSessionIds as HashSet<string>
+            ?? new HashSet<string>(hiddenSessionIds.Where(id => !string.IsNullOrWhiteSpace(id)), StringComparer.Ordinal);
+        if (hiddenSet.Count == 0)
+        {
+            return sessions as IReadOnlyList<SessionSummary> ?? [.. sessions];
+        }
+
+        return sessions
+            .Where(s => !CollectSessionIds(s).Any(hiddenSet.Contains))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Returns true when a server error message indicates an interrupted gateway durable-queue execution lock.
+    /// </summary>
+    public static bool IsUnknownExecutionConflict(string? message) =>
+        !string.IsNullOrWhiteSpace(message)
+        && (message.Contains("unknown_execution", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("outcome-unknown", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("outcome_unknown", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("durable queue", StringComparison.OrdinalIgnoreCase));
+
     private static void AddIfNonEmpty(HashSet<string> set, string? value)
     {
         if (!string.IsNullOrWhiteSpace(value))

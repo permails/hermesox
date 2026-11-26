@@ -18,6 +18,7 @@ public sealed record AppSettingsData
     public string ThemePreference { get; set; } = "system";
     public string? LastAttachmentDirectory { get; set; }
     public int MaxAttachmentMegabytes { get; set; } = AttachmentUploadHelper.DefaultMaxAttachmentMegabytes;
+    public Dictionary<string, List<string>> LocallyHiddenSessions { get; set; } = new();
 }
 
 public sealed class LocalCacheStore

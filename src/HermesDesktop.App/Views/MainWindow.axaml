@@ -1468,6 +1468,10 @@
             <Button Classes="subtle" Content="{Binding Loc.Keep}" Padding="14,7"
                     IsEnabled="{Binding CanConfirmOrCancelDeleteSession}"
                     Command="{Binding CancelDeleteSessionCommand}"/>
+            <Button Classes="subtle" Content="{Binding Loc.HideSessionLocally}" Padding="14,7"
+                    IsVisible="{Binding CanForceRemoveBlockedSessionLocally}"
+                    IsEnabled="{Binding CanConfirmOrCancelDeleteSession}"
+                    Command="{Binding ForceRemoveDeleteSessionLocallyCommand}"/>
             <Button Content="{Binding DeleteSessionActionLabel}" Padding="16,7" CornerRadius="6"
                     Background="#C42B1C" Foreground="White" FontWeight="SemiBold"
                     IsEnabled="{Binding CanConfirmOrCancelDeleteSession}"

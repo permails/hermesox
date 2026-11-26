@@ -119,4 +119,39 @@ public class SessionMutationTests
         Assert.DoesNotContain("profile=", handler.Requests[0].PathAndQuery);
         Assert.Equal("/api/sessions/sess-default-1", handler.Requests[1].PathAndQuery);
     }
+
+    [Fact]
+    public void SessionCatalogHelper_FiltersHiddenSessionsAcrossAliases()
+    {
+        var blocked = new HermesDesktop.Core.Models.SessionSummary
+        {
+            Id = "local-4e44",
+            StoredSessionId = "local-4e44",
+            RuntimeSessionId = "02371876",
+            AlternateIds = ["rt-alias"],
+            Title = "Blocked session"
+        };
+        var healthy = new HermesDesktop.Core.Models.SessionSummary
+        {
+            Id = "sess-ok",
+            Title = "Healthy session"
+        };
+
+        var filtered = HermesDesktop.Core.Sessions.SessionCatalogHelper.FilterHiddenSessions(
+            [blocked, healthy],
+            ["02371876"]);
+
+        var kept = Assert.Single(filtered);
+        Assert.Equal("sess-ok", kept.Id);
+    }
+
+    [Theory]
+    [InlineData("HTTP 409: {\"detail\":\"unknown_execution\"}", true)]
+    [InlineData("Session x has outcome-unknown work in the gateway's durable queue.", true)]
+    [InlineData("HTTP 409: {\"detail\":\"revision_conflict\"}", false)]
+    [InlineData(null, false)]
+    public void SessionCatalogHelper_DetectsUnknownExecutionConflict(string? message, bool expected)
+    {
+        Assert.Equal(expected, HermesDesktop.Core.Sessions.SessionCatalogHelper.IsUnknownExecutionConflict(message));
+    }
 }
